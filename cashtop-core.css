@@ -928,3 +928,20 @@ select[data-ct-enhanced="true"] { touch-action: pan-y; }
   line-height: 1;
   margin: 0;
 }
+
+
+/* ===== Revision 17: instant cached navigation and smooth rendering ===== */
+#nprogress, #nprogress .bar, .pace, .pace-progress, .page-loading-bar,
+.loading-bar, .top-loading-bar, .ct-page-loading, progress[aria-label="loading"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+html { -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
+body { overscroll-behavior: none; -webkit-font-smoothing: antialiased; }
+a, button, input, select, textarea { touch-action: manipulation; }
+.ct-page-host, .ct-original-page { transform: translateZ(0); backface-visibility: hidden; }
+.ct-sidebar, .ct-sidebar-overlay, .modal-overlay, .ct-bottom-nav { backface-visibility: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .ct-sidebar, .modal-overlay, .ct-sidebar-overlay { will-change: transform, opacity; }
+}

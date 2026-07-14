@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>شاشة الكاشير الذكية - كاش توب 2</title>
@@ -227,13 +230,13 @@
 
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
-    <link rel="stylesheet" href="cashtop-core.css?v=14">
+    <link rel="stylesheet" href="cashtop-core.css?v=17">
     <script src="https://unpkg.com/html5-qrcode"></script>
-    <script src="barcode-tools.js?v=14"></script>
-    <script src="cashtop-core.js?v=14"></script>
+    <script src="barcode-tools.js?v=17"></script>
+    <script src="cashtop-core.js?v=17"></script>
     <script src="firebase-config.js?v=14"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=14"></script>
+    <script type="module" src="firebase-sync.js?v=17"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -572,7 +575,7 @@
         let customersData = readArray('cashtop_customers');
         let branchesData = readArray('cashtop_branches');
         const cashierSession = window.Cashtop?.getSession?.() || readObject('cashtop_session', {});
-        const sessionBranchId = cashierSession.branchId || null;
+        const sessionBranchId = cashierSession.dataBranchId || cashierSession.branchId || 'MAIN';
         let stockBranchId = sessionBranchId;
         let fundsDB = readObject('cashtop_funds_db', { accounts: [], accountLogs: [] });
         if (!Array.isArray(fundsDB.accounts)) fundsDB.accounts = [];
@@ -711,10 +714,26 @@
         }
 
         function isMainStockBranch(branchId) {
-            if (!branchId) return true;
+            const normalized = String(branchId || 'MAIN').trim().toUpperCase();
+            // جلسات الفرع الرئيسي تُخزّن بالقيمة MAIN، وليس بمعرّف سجل الفرع.
+            // عدم اعتبار MAIN فرعاً رئيسياً كان يكتب الخصم داخل branchStocks.MAIN
+            // ثم يعيد الكمية الأصلية بعد حفظ الفاتورة.
+            if (!branchId || normalized === 'MAIN') return true;
             const branch = branchesData.find(item => String(item.id) === String(branchId));
             if (branch?.isMain === true) return true;
             return !branchesData.some(item => item.isMain === true) && String(branchesData[0]?.id || '') === String(branchId);
+        }
+
+        function roundStockQuantity(value) {
+            const number = Number(value || 0);
+            if (!Number.isFinite(number)) return 0;
+            return Math.max(0, Number(number.toFixed(6)));
+        }
+
+        function itemQuantityInPieces(item) {
+            const quantity = roundStockQuantity(item?.qty || 0);
+            const piecesPerUnit = Math.max(0.000001, Number(item?.piecesPerUnit || 1));
+            return roundStockQuantity(item?.selectedUnit === 'unit' ? quantity * piecesPerUnit : quantity);
         }
 
         function getBranchDisplayName(branchId) {
@@ -774,9 +793,9 @@
 
         function getProductStockForBranch(product, branchId = stockBranchId) {
             if (!product) return 0;
-            const baseStock = isMainStockBranch(branchId)
-                ? Math.max(0, Number(product.stockPieces || 0))
-                : Math.max(0, Number(product.branchStocks?.[branchId] ?? product.stockPieces ?? 0));
+            // cashtop-core يعيد المنتج مُسقطاً على الفرع النشط، لذلك stockPieces
+            // هو الرصيد الحقيقي للفرع الحالي سواء كان MAIN أو فرعاً فرعياً.
+            const baseStock = Math.max(0, Number(product.stockPieces || 0));
             const lots = getTrackedLotState(product, branchId);
             // عندما تغطي الدفعات كامل الرصيد، لا نعرض الكمية المنتهية للبيع.
             if (lots.tracked + 0.001 >= baseStock) return Math.max(0, baseStock - lots.expired);
@@ -785,14 +804,14 @@
 
         function getVariantStockForBranch(variant, branchId = stockBranchId) {
             if (!variant) return 0;
-            if (isMainStockBranch(branchId)) return Number(variant.qty || 0);
-            return Number(variant.branchStocks?.[branchId] || 0);
+            // qty هو رصيد المقاس بعد إسقاط بيانات المنتج على الفرع النشط.
+            return Number(variant.qty || 0);
         }
 
         function changeProductStockForBranch(product, item, direction, branchId = stockBranchId) {
             if (!product || item.isCustom) return;
-            const quantity = Number(item.qty || 0);
-            const pieces = item.selectedUnit === 'unit' ? quantity * (Number(item.piecesPerUnit) || 1) : quantity;
+            const quantity = roundStockQuantity(item.qty || 0);
+            const pieces = itemQuantityInPieces(item);
             const mainBranch = isMainStockBranch(branchId);
             if (direction < 0) item.lotAllocations = allocateLotsForSale(product, pieces, branchId);
             else if (direction > 0 && Array.isArray(item.lotAllocations)) restoreLotAllocations(product, item.lotAllocations);
@@ -801,21 +820,89 @@
                 const variant = product.variants.find(v => v.size === item.variantSize && v.color === item.variantColor);
                 if (!variant) return;
                 if (mainBranch) {
-                    variant.qty = Math.max(0, Number(variant.qty || 0) + direction * quantity);
-                    product.stockPieces = Math.max(0, Number(product.stockPieces || 0) + direction * pieces);
+                    variant.qty = roundStockQuantity(Number(variant.qty || 0) + direction * quantity);
+                    product.stockPieces = roundStockQuantity(Number(product.stockPieces || 0) + direction * pieces);
                 } else {
+                    const nextVariantStock = roundStockQuantity(Number(variant.qty || 0) + direction * quantity);
+                    variant.qty = nextVariantStock;
                     if (!variant.branchStocks || typeof variant.branchStocks !== 'object') variant.branchStocks = {};
-                    variant.branchStocks[branchId] = Math.max(0, Number(variant.branchStocks[branchId] || 0) + direction * quantity);
+                    variant.branchStocks[branchId] = nextVariantStock;
+                    const nextProductStock = roundStockQuantity(Number(product.stockPieces || 0) + direction * pieces);
+                    product.stockPieces = nextProductStock;
+                    if (!product.branchStocks || typeof product.branchStocks !== 'object') product.branchStocks = {};
+                    product.branchStocks[branchId] = nextProductStock;
                 }
                 return;
             }
 
             if (mainBranch) {
-                product.stockPieces = Math.max(0, Number(product.stockPieces || 0) + direction * pieces);
+                product.stockPieces = roundStockQuantity(Number(product.stockPieces || 0) + direction * pieces);
+                // تنظيف أثر النسخ السابقة التي كتبت رصيداً خاطئاً داخل MAIN.
+                if (product.branchStocks && Object.prototype.hasOwnProperty.call(product.branchStocks, 'MAIN')) delete product.branchStocks.MAIN;
             } else {
+                const nextStock = roundStockQuantity(Number(product.stockPieces || 0) + direction * pieces);
+                product.stockPieces = nextStock;
                 if (!product.branchStocks || typeof product.branchStocks !== 'object') product.branchStocks = {};
-                product.branchStocks[branchId] = Math.max(0, Number(product.branchStocks[branchId] || 0) + direction * pieces);
+                product.branchStocks[branchId] = nextStock;
             }
+        }
+
+        function collectStockRequirements(items) {
+            const products = new Map();
+            const variants = new Map();
+            (items || []).forEach(item => {
+                if (!item || item.isCustom) return;
+                const productId = String(item.id);
+                if (item.isVariant) {
+                    const key = `${productId}::${item.variantSize || ''}::${item.variantColor || ''}`;
+                    variants.set(key, roundStockQuantity((variants.get(key) || 0) + Number(item.qty || 0)));
+                } else {
+                    products.set(productId, roundStockQuantity((products.get(productId) || 0) + itemQuantityInPieces(item)));
+                }
+            });
+            return { products, variants };
+        }
+
+        function validateStockBeforeIssue(items, branchId = stockBranchId) {
+            const requirements = collectStockRequirements(items);
+            for (const [productId, requiredPieces] of requirements.products) {
+                const product = productsData.find(prod => String(prod.id) === productId);
+                if (!product) return { ok: false, message: 'أحد أصناف السلة لم يعد موجوداً في المخزون.' };
+                const available = roundStockQuantity(getProductStockForBranch(product, branchId));
+                if (available + 1e-9 < requiredPieces) {
+                    return { ok: false, message: `المخزون غير كافٍ للصنف [${product.name || productId}]. المتاح ${quantityDisplay(available)} والمطلوب ${quantityDisplay(requiredPieces)}.` };
+                }
+            }
+            for (const [key, requiredQuantity] of requirements.variants) {
+                const [productId, size, color] = key.split('::');
+                const product = productsData.find(prod => String(prod.id) === productId);
+                const variant = product?.variants?.find(item => String(item.size || '') === size && String(item.color || '') === color);
+                const available = roundStockQuantity(getVariantStockForBranch(variant, branchId));
+                if (!product || !variant || available + 1e-9 < requiredQuantity) {
+                    return { ok: false, message: `المخزون غير كافٍ للمقاس المحدد من [${product?.name || productId}].` };
+                }
+            }
+            return { ok: true, requirements };
+        }
+
+        function verifyPersistedStock(expectedProducts, touchedItems) {
+            const persisted = readArray('cashtop_products');
+            const ids = new Set((touchedItems || []).filter(item => item && !item.isCustom).map(item => String(item.id)));
+            for (const id of ids) {
+                const expected = expectedProducts.find(item => String(item.id) === id);
+                const actual = persisted.find(item => String(item.id) === id);
+                if (!expected || !actual) throw new Error(`STOCK_PERSISTENCE_MISSING:${id}`);
+                if (Math.abs(Number(expected.stockPieces || 0) - Number(actual.stockPieces || 0)) > 1e-6) {
+                    throw new Error(`STOCK_PERSISTENCE_MISMATCH:${id}`);
+                }
+                (expected.variants || []).forEach((variant, index) => {
+                    const actualVariant = (actual.variants || [])[index];
+                    if (actualVariant && Math.abs(Number(variant.qty || 0) - Number(actualVariant.qty || 0)) > 1e-6) {
+                        throw new Error(`VARIANT_STOCK_PERSISTENCE_MISMATCH:${id}:${index}`);
+                    }
+                });
+            }
+            return persisted;
         }
 
         function adjustProductStock(items, direction, branchId = stockBranchId) {
@@ -875,8 +962,7 @@
             let total = 0;
             basketItems.forEach(item => {
                 if(String(item.id) === String(id) && !item.isCustom && !item.isVariant) {
-                    let pieces = item.selectedUnit === 'unit' ? (item.qty * item.piecesPerUnit) : item.qty;
-                    total += pieces;
+                    total += itemQuantityInPieces(item);
                 }
             });
             return total;
@@ -1548,14 +1634,23 @@
             const snapshotKeys = ['cashtop_products','cashtop_customers','cashtop_funds_db','cashtop_invoices','cashtop_sales_offers'];
             const snapshots = Object.fromEntries(snapshotKeys.map(key => [key, localStorage.getItem(key)]));
             try {
-            const printerSettings = readObject('cashtop_printer_settings', {});
-            if (!printStatus && printerSettings.autoPrint === true) printStatus = true;
             const requiredPermission = editingOriginalInvoice ? 'sales.edit' : 'sales.create';
             if (!window.Cashtop?.can?.(requiredPermission)) { showToast('لا تملك الصلاحية اللازمة لحفظ هذه الفاتورة', 'error'); return; }
             if (printStatus && !window.Cashtop?.can?.('sales.print')) { showToast('سيتم الحفظ دون طباعة لأن صلاحية الطباعة غير متاحة', 'warning'); printStatus = false; }
             if(basketItems.length === 0) { showToast('السلة فارغة!', 'error'); return; }
+            const stockCheck = validateStockBeforeIssue(basketItems, stockBranchId);
+            if (!stockCheck.ok) { showToast(stockCheck.message, 'error'); return; }
 
             const invoiceObj = buildInvoiceData('issued');
+            invoiceObj.stockMovements = basketItems.filter(item => !item.isCustom).map(item => ({
+                productId: item.id,
+                variantSize: item.variantSize || '',
+                variantColor: item.variantColor || '',
+                selectedUnit: item.selectedUnit || 'piece',
+                quantity: roundStockQuantity(item.qty || 0),
+                quantityPieces: itemQuantityInPieces(item)
+            }));
+            invoiceObj.stockAppliedLocallyAt = new Date().toISOString();
             if (!Number.isFinite(invoiceObj.total) || invoiceObj.total <= 0) { showToast('إجمالي الفاتورة غير صحيح. راجع الأسعار والكميات.', 'error'); return; }
             if (invoiceObj.debt > 0 && !window.Cashtop?.can?.('sales.credit')) { showToast('لا تملك صلاحية تسجيل بيع آجل أو دين', 'error'); return; }
             if (Number(invoiceObj.discount || 0) > 0 && !window.Cashtop?.can?.('sales.discount')) { showToast('لا تملك صلاحية تطبيق الخصم', 'error'); return; }
@@ -1589,6 +1684,10 @@
             // خصم المخزون الحقيقي من الفرع الذي دخل منه المدير أو الموظف.
             adjustProductStock(basketItems, -1, stockBranchId);
             localStorage.setItem('cashtop_products', JSON.stringify(productsData));
+            // قراءة فورية بعد الكتابة تضمن أن الخصم الحقيقي (قطعة أو كرتونة)
+            // ثبت محلياً قبل حفظ بقية القيود. localStorage ينشئ تلقائياً عملية
+            // مزامنة معلقة عند العمل دون إنترنت.
+            productsData = verifyPersistedStock(productsData, basketItems);
 
             // ترحيل المبلغ المقبوض إلى الحساب المختار
             const selectedAccount = fundsDB.accounts.find(acc => String(acc.id) === String(invoiceObj.accountId)) || fundsDB.accounts[0];
@@ -1623,7 +1722,7 @@
             if(printStatus) {
                 if (printThermalInvoice(invoiceObj)) showToast('تم الحفظ وإرسال الفاتورة للطباعة الحرارية!', 'success');
             } else {
-                showToast('تم حفظ الفاتورة بنجاح!', 'success');
+                showToast(navigator.onLine ? 'تم حفظ الفاتورة بنجاح!' : 'تم حفظ الفاتورة محلياً، وستتزامن تلقائياً عند عودة الإنترنت.', 'success');
             }
 
             basketItems = [];
@@ -1645,7 +1744,6 @@
             
             renderBasket(); 
         
-                productsData = readArray('cashtop_products');
                 customersData = readArray('cashtop_customers');
                 fundsDB = readObject('cashtop_funds_db', { accounts: [], accountLogs: [] });
             } catch (error) {
@@ -2041,6 +2139,7 @@
         }
 
         function refreshCashierDatasets(key) {
+            if (invoiceSaveInProgress) return;
             if (!key || key === 'cashtop_products') {
                 productsData = readArray('cashtop_products');
                 runCashierStep('refresh products', renderProductsGrid);

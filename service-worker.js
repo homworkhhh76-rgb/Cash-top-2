@@ -1,5 +1,5 @@
-const CACHE_NAME = 'cash-top-2-static-v25';
-const RUNTIME_CACHE = 'cash-top-2-runtime-v25';
+const CACHE_NAME = 'cash-top-2-static-v27';
+const RUNTIME_CACHE = 'cash-top-2-runtime-v27';
 const PRECACHE_URLS = [
   'https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
@@ -89,7 +89,7 @@ async function cacheRemoteStylesAndFonts(cache) {
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    await Promise.allSettled(PRECACHE_URLS.map(url => cache.add(url)));
+    await Promise.allSettled(PRECACHE_URLS.map(url => cache.add(new Request(url, { cache: 'reload' }))));
     await cacheRemoteStylesAndFonts(cache);
     await self.skipWaiting();
   })());
@@ -100,46 +100,44 @@ self.addEventListener('activate', event => {
     const names = await caches.keys();
     await Promise.all(names.filter(name => ![CACHE_NAME, RUNTIME_CACHE].includes(name)).map(name => caches.delete(name)));
     await self.clients.claim();
+    await warmCache();
   })());
 });
 
 
-async function networkFirst(request) {
+async function cachedLocalFirst(request) {
   const runtime = await caches.open(RUNTIME_CACHE);
+  const cached = (await caches.match(request, { ignoreSearch: true })) ||
+    (await runtime.match(request, { ignoreSearch: true }));
+  // صفحات التطبيق وأصوله المحلية تُفتح دائماً من الكاش عند وجودها،
+  // حتى مع توفر الإنترنت. تحديث النسخة يتم فقط عبر إصدار Service Worker جديد.
+  if (cached) return cached;
   try {
     const response = await fetch(request, { cache: 'no-store' });
-    if (response && (response.ok || response.type === 'opaque')) {
-      await runtime.put(request, response.clone());
-    }
+    if (response && response.ok) await runtime.put(request, response.clone());
     return response;
   } catch (_) {
-    return (await runtime.match(request, { ignoreSearch: true })) ||
-      (await caches.match(request, { ignoreSearch: true })) ||
-      (request.mode === 'navigate' ? (await caches.match('./offline.html')) : Response.error());
+    if (request.mode === 'navigate') return (await caches.match('./offline.html')) || Response.error();
+    return Response.error();
   }
 }
 
-async function cacheFirstWithRefresh(request) {
+async function cachedRemoteFirst(request) {
   const runtime = await caches.open(RUNTIME_CACHE);
-  const requestUrl = new URL(request.url);
-  const ignoreSearch = request.mode === 'navigate' || requestUrl.origin === self.location.origin;
-  let cached = await runtime.match(request, { ignoreSearch });
-  if (!cached) cached = await caches.match(request, { ignoreSearch });
-
-  // Always return the local cache immediately when available, even while online.
+  const cached = (await runtime.match(request, { ignoreSearch: true })) ||
+    (await caches.match(request, { ignoreSearch: true }));
   if (cached) {
+    // تحديث المكتبات الخارجية بصمت دون تعطيل فتح الصفحة.
     fetch(request).then(response => {
       if (response && (response.ok || response.type === 'opaque')) runtime.put(request, response.clone());
     }).catch(() => null);
     return cached;
   }
-
   try {
     const response = await fetch(request);
     if (response && (response.ok || response.type === 'opaque')) await runtime.put(request, response.clone());
     return response;
   } catch (_) {
-    if (request.mode === 'navigate') return (await caches.match('./offline.html')) || Response.error();
     return Response.error();
   }
 }
@@ -149,13 +147,12 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
-  // جميع الصفحات والأصول محلية أولاً؛ يتم تحديث النسخة في الخلفية عند توفر الإنترنت.
-  event.respondWith(cacheFirstWithRefresh(request));
+  event.respondWith(url.origin === self.location.origin ? cachedLocalFirst(request) : cachedRemoteFirst(request));
 });
 
 async function warmCache() {
   const cache = await caches.open(CACHE_NAME);
-  await Promise.allSettled(PRECACHE_URLS.map(url => cache.add(url)));
+  await Promise.allSettled(PRECACHE_URLS.map(url => cache.add(new Request(url, { cache: 'reload' }))));
   await cacheRemoteStylesAndFonts(cache);
 }
 

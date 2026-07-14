@@ -2194,14 +2194,15 @@
       navigator.storage.persist().catch(() => false);
     }
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-      window.addEventListener('load', async () => {
+      (async () => {
         try {
           const registration = await navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
-          registration.active?.postMessage({ type: 'WARM_CACHE' });
+          const worker = registration.active || registration.waiting || registration.installing;
+          worker?.postMessage({ type: 'WARM_CACHE' });
         } catch (err) {
           console.warn('[CASH TOP 2] SW:', err);
         }
-      });
+      })();
     }
   }
 })();
