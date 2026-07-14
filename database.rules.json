@@ -1,0 +1,32 @@
+{
+  "rules": {
+    "cashTopExchange": {
+      "cashTopAdmin": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      },
+      "cashTopPOS": {
+        "$companyId": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['datasets']) || newData.hasChild('meta')"
+        }
+      }
+    },
+    "cashTopPOS": {
+      "v6": {
+        "$companyId": {
+          ".read": "auth != null",
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['datasets']) || newData.hasChild('meta')"
+        }
+      }
+    },
+    "cashTopChargeApp": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    ".read": false,
+    ".write": false
+  }
+}

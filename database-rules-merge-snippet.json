@@ -1,0 +1,15 @@
+{
+  "cashTopExchange": {
+    "cashTopAdmin": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "cashTopPOS": {
+      "$companyId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['datasets']) || newData.hasChild('meta')"
+      }
+    }
+  }
+}

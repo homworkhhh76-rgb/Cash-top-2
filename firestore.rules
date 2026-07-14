@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isSuperAdmin() { return signedIn() && request.auth.token.superAdmin == true; }
+    function userProfile() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isCompanyMember(companyId) {
+      return signedIn() && userProfile().active == true && userProfile().companyId == companyId;
+    }
+    function ownsLicense(licenseKey) {
+      return signedIn() && userProfile().active == true && userProfile().licenseKey == licenseKey;
+    }
+
+    match /users/{userId} {
+      allow read: if isSuperAdmin() || (signedIn() && request.auth.uid == userId);
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /licenses/{licenseKey} {
+      allow read: if isSuperAdmin() || ownsLicense(licenseKey);
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /companies/{companyId} {
+      allow read, write: if isSuperAdmin() || isCompanyMember(companyId);
+      match /{document=**} {
+        allow read, write: if isSuperAdmin() || isCompanyMember(companyId);
+      }
+    }
+  }
+}
