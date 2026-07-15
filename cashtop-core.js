@@ -2497,6 +2497,8 @@
           const registration = await navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
           const worker = registration.active || registration.waiting || registration.installing;
           worker?.postMessage({ type: 'VERIFY_CACHE' });
+          const ready = await navigator.serviceWorker.ready;
+          ready.active?.postMessage?.({ type: 'WARM_CACHE' });
         } catch (err) {
           console.warn('[CASH TOP 2] SW:', err);
         }

@@ -6,22 +6,61 @@
     'ean_13', 'ean_8', 'itf', 'pdf417', 'qr_code', 'upc_a', 'upc_e'
   ];
 
+  const IS_IOS = /iPad|iPhone|iPod/i.test(navigator.userAgent || '') ||
+    (navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1);
+
+  function isPermissionError(error) {
+    const name = String(error?.name || '');
+    return name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError';
+  }
+
   function getErrorMessage(error) {
     const name = String(error?.name || '');
-    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') return 'تم رفض صلاحية الكاميرا. اسمح للكاميرا من إعدادات الموقع ثم أعد المحاولة.';
+    const code = String(error?.message || error || '');
+    if (code === 'CAMERA_UNSUPPORTED') return 'هذا المتصفح لا يوفّر وصولاً مباشراً للكاميرا. استخدم زر التقاط صورة للباركود.';
+    if (code === 'NO_BARCODE_ENGINE') return 'تعذر تحميل محرك قراءة الباركود. افتح النظام مرة واحدة مع الإنترنت ليتم حفظه في الكاش.';
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      return IS_IOS
+        ? 'تم رفض صلاحية الكاميرا. اسمح للكاميرا لهذا الموقع من إعدادات Safari/الموقع في الآيفون ثم أعد المحاولة، أو استخدم التقاط صورة.'
+        : 'تم رفض صلاحية الكاميرا. اسمح للكاميرا لهذا الموقع من إعدادات المتصفح ثم أعد المحاولة، أو استخدم التقاط صورة.';
+    }
     if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'لم يتم العثور على كاميرا في هذا الجهاز.';
-    if (name === 'NotReadableError' || name === 'TrackStartError') return 'الكاميرا مستخدمة في تطبيق آخر أو تعذر تشغيلها.';
-    if (name === 'OverconstrainedError') return 'إعدادات الكاميرا الخلفية غير متاحة على هذا الجهاز.';
-    if (!window.isSecureContext) return 'تشغيل الكاميرا يحتاج فتح النظام عبر HTTPS أو localhost.';
-    return 'تعذر تشغيل كاميرا الباركود. تحقق من الصلاحية ثم أعد المحاولة.';
+    if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') return 'الكاميرا مستخدمة في تطبيق آخر أو تعذر تشغيلها. أغلق التطبيق الآخر ثم أعد المحاولة.';
+    if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') return 'تعذر تشغيل الكاميرا الخلفية بهذه الإعدادات. سيتم استخدام وضع متوافق مع الجهاز.';
+    if (name === 'SecurityError' || (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1')) {
+      return 'تشغيل الكاميرا يحتاج فتح النظام عبر HTTPS. لا يمكن للمتصفح منح الكاميرا لصفحة HTTP عادية.';
+    }
+    return 'تعذر تشغيل كاميرا الباركود. تحقق من صلاحية الكاميرا ثم أعد المحاولة، أو استخدم التقاط صورة.';
+  }
+
+  function ensureSecureCameraContext() {
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      throw Object.assign(new Error('INSECURE_CONTEXT'), { name: 'SecurityError' });
+    }
+  }
+
+  async function openBestCameraStream() {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('CAMERA_UNSUPPORTED');
+    const attempts = [
+      { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+      { video: { facingMode: 'environment' }, audio: false },
+      { video: true, audio: false }
+    ];
+    let lastError = null;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        lastError = error;
+        if (isPermissionError(error) || String(error?.name || '') === 'NotReadableError') throw error;
+      }
+    }
+    throw lastError || new Error('CAMERA_UNSUPPORTED');
   }
 
   async function requestPermission() {
-    if (!navigator.mediaDevices?.getUserMedia) throw new Error('CAMERA_UNSUPPORTED');
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' } },
-      audio: false
-    });
+    ensureSecureCameraContext();
+    const stream = await openBestCameraStream();
     stream.getTracks().forEach(track => track.stop());
     return true;
   }
@@ -40,37 +79,66 @@
     if (!container) return;
     container.querySelectorAll('video').forEach(video => {
       try { video.pause(); } catch (_) {}
-      video.srcObject = null;
+      try { video.srcObject = null; } catch (_) {}
     });
     container.innerHTML = '';
   }
 
-  async function startNativeScanner(container, onDetected, onError, continuous = false) {
+  function tuneVideoForMobile(container) {
+    const video = container?.querySelector?.('video');
+    if (!video) return;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.setAttribute('autoplay', '');
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.style.width = '100%';
+    video.style.height = '100%';
+    video.style.maxHeight = '58vh';
+    video.style.objectFit = 'cover';
+    video.style.background = '#000';
+  }
+
+  async function createBarcodeDetector() {
+    if (!('BarcodeDetector' in window)) return null;
     const formats = typeof BarcodeDetector.getSupportedFormats === 'function'
       ? await BarcodeDetector.getSupportedFormats().catch(() => DEFAULT_FORMATS)
       : DEFAULT_FORMATS;
-    const detector = new BarcodeDetector({ formats: formats.length ? formats : DEFAULT_FORMATS });
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      },
-      audio: false
-    });
+    try {
+      return new BarcodeDetector({ formats: formats.length ? formats : DEFAULT_FORMATS });
+    } catch (_) {
+      try { return new BarcodeDetector(); } catch (_) { return null; }
+    }
+  }
+
+  async function startNativeScanner(container, onDetected, onError, continuous = false) {
+    const detector = await createBarcodeDetector();
+    if (!detector) throw new Error('NO_NATIVE_BARCODE_DETECTOR');
+    const stream = await openBestCameraStream();
 
     const video = document.createElement('video');
     video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
     video.setAttribute('autoplay', '');
     video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
     video.style.width = '100%';
-    video.style.maxHeight = '55vh';
+    video.style.height = '100%';
+    video.style.maxHeight = '58vh';
     video.style.objectFit = 'cover';
     video.style.background = '#000';
     container.innerHTML = '';
     container.appendChild(video);
     video.srcObject = stream;
-    await video.play();
+
+    try {
+      await video.play();
+    } catch (error) {
+      stream.getTracks().forEach(track => track.stop());
+      throw error;
+    }
 
     let stopped = false;
     let lastScanAt = 0;
@@ -85,14 +153,14 @@
       if (animationFrame) cancelAnimationFrame(animationFrame);
       stream.getTracks().forEach(track => track.stop());
       try { video.pause(); } catch (_) {}
-      video.srcObject = null;
+      try { video.srcObject = null; } catch (_) {}
       clearContainer(container);
     };
 
     const loop = async timestamp => {
       if (stopped) return;
       animationFrame = requestAnimationFrame(loop);
-      if (busy || video.readyState < 2 || timestamp - lastScanAt < 110) return;
+      if (busy || video.readyState < 2 || timestamp - lastScanAt < (IS_IOS ? 150 : 110)) return;
       lastScanAt = timestamp;
       busy = true;
       try {
@@ -107,7 +175,7 @@
             if (!continuous) await stop();
             onDetected(value);
           }
-        } else if (continuous && lastDetectedValue && now - lastDetectedAt > 650) {
+        } else if (continuous && lastDetectedValue && now - lastDetectedAt > 700) {
           lastDetectedValue = '';
         }
       } catch (error) {
@@ -117,14 +185,22 @@
       }
     };
     animationFrame = requestAnimationFrame(loop);
-    return { stop };
+    return { stop, mode: 'live-native' };
+  }
+
+  function pickRearCamera(cameras) {
+    const list = Array.isArray(cameras) ? cameras : [];
+    if (!list.length) return null;
+    const rearPattern = /(back|rear|environment|world|traseira|arrière|hinten|خلف|خلفية)/i;
+    return list.find(camera => rearPattern.test(String(camera?.label || ''))) || list[list.length - 1] || list[0];
   }
 
   async function startHtml5Scanner(container, onDetected, onError, continuous = false) {
     if (typeof window.Html5Qrcode !== 'function') throw new Error('NO_BARCODE_ENGINE');
     if (!container.id) container.id = `ct_barcode_reader_${Date.now()}`;
     clearContainer(container);
-    const instance = new window.Html5Qrcode(container.id);
+
+    let instance = new window.Html5Qrcode(container.id, false);
     let stopped = false;
     let detected = false;
     let lastDetectedValue = '';
@@ -134,44 +210,169 @@
       if (stopped) return;
       stopped = true;
       try {
-        if (instance.isScanning) await instance.stop();
+        if (instance?.isScanning) await instance.stop();
       } catch (_) {}
-      try { instance.clear(); } catch (_) {}
+      try { instance?.clear?.(); } catch (_) {}
       clearContainer(container);
     };
 
-    await instance.start(
-      { facingMode: 'environment' },
-      {
-        fps: 18,
-        qrbox: { width: Math.min(300, Math.max(220, container.clientWidth - 36)), height: 160 },
-        aspectRatio: 1.777778,
-        disableFlip: false
+    const scannerConfig = {
+      fps: IS_IOS ? 12 : 18,
+      qrbox: {
+        width: Math.min(320, Math.max(210, Number(container.clientWidth || 320) - 28)),
+        height: IS_IOS ? 180 : 165
       },
-      async decodedText => {
-        const value = String(decodedText || '').trim();
-        if (!value) return;
-        const now = Date.now();
-        if (continuous) {
-          lastDetectedAt = now;
-          if (value === lastDetectedValue) return;
-          lastDetectedValue = value;
-          onDetected(value);
-          return;
-        }
-        if (detected) return;
-        detected = true;
-        await stop();
+      disableFlip: false
+    };
+
+    const onSuccess = async decodedText => {
+      const value = String(decodedText || '').trim();
+      if (!value) return;
+      const now = Date.now();
+      if (continuous) {
+        lastDetectedAt = now;
+        if (value === lastDetectedValue) return;
+        lastDetectedValue = value;
         onDetected(value);
-      },
-      () => {
-        if (continuous && lastDetectedValue && Date.now() - lastDetectedAt > 650) lastDetectedValue = '';
+        return;
       }
-    ).catch(error => {
-      onError?.(error);
-      throw error;
+      if (detected) return;
+      detected = true;
+      await stop();
+      onDetected(value);
+    };
+
+    const onScanFailure = () => {
+      if (continuous && lastDetectedValue && Date.now() - lastDetectedAt > 700) lastDetectedValue = '';
+    };
+
+    async function startWith(cameraConfig) {
+      await instance.start(cameraConfig, scannerConfig, onSuccess, onScanFailure);
+      tuneVideoForMobile(container);
+      // بعض إصدارات WebKit تنشئ الفيديو بعد اكتمال start مباشرة بقليل.
+      setTimeout(() => tuneVideoForMobile(container), 80);
+    }
+
+    try {
+      await startWith({ facingMode: 'environment' });
+    } catch (firstError) {
+      if (isPermissionError(firstError)) throw firstError;
+      let cameras = [];
+      try { cameras = await window.Html5Qrcode.getCameras(); } catch (_) {}
+      const rear = pickRearCamera(cameras);
+      if (!rear?.id) throw firstError;
+      try { instance.clear(); } catch (_) {}
+      instance = new window.Html5Qrcode(container.id, false);
+      await startWith(rear.id);
+    }
+
+    return { stop, mode: 'live-html5' };
+  }
+
+  async function decodeBarcodeImage(file) {
+    if (!file) throw new Error('NO_IMAGE');
+
+    const detector = await createBarcodeDetector();
+    if (detector && typeof createImageBitmap === 'function') {
+      let bitmap = null;
+      try {
+        bitmap = await createImageBitmap(file);
+        const results = await detector.detect(bitmap);
+        const value = String(results?.[0]?.rawValue || '').trim();
+        if (value) return value;
+      } catch (_) {
+      } finally {
+        try { bitmap?.close?.(); } catch (_) {}
+      }
+    }
+
+    if (typeof window.Html5Qrcode === 'function') {
+      const hidden = document.createElement('div');
+      hidden.id = `ct_barcode_file_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      hidden.style.position = 'fixed';
+      hidden.style.left = '-10000px';
+      hidden.style.top = '-10000px';
+      hidden.style.width = '1px';
+      hidden.style.height = '1px';
+      hidden.style.overflow = 'hidden';
+      document.body.appendChild(hidden);
+      const reader = new window.Html5Qrcode(hidden.id, false);
+      try {
+        return String(await reader.scanFile(file, true) || '').trim();
+      } finally {
+        try { reader.clear(); } catch (_) {}
+        hidden.remove();
+      }
+    }
+
+    throw new Error('NO_BARCODE_ENGINE');
+  }
+
+  function createPhotoFallback(container, onDetected, onError, continuous, message) {
+    clearContainer(container);
+    let stopped = false;
+
+    const box = document.createElement('div');
+    box.style.cssText = 'width:100%;min-height:220px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:#111827;color:#fff;';
+
+    const icon = document.createElement('div');
+    icon.innerHTML = '<span style="font-size:38px;line-height:1">📷</span>';
+
+    const text = document.createElement('div');
+    text.style.cssText = 'font-size:13px;line-height:1.8;max-width:330px;';
+    text.textContent = `${message || 'تعذر تشغيل البث المباشر.'} يمكنك تصوير الباركود بالكاميرا وسيتم قراءته مباشرة.`;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.setAttribute('capture', 'environment');
+    input.style.display = 'none';
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'فتح الكاميرا والتقاط صورة للباركود';
+    button.style.cssText = 'border:0;border-radius:8px;padding:11px 16px;background:#0ea5e9;color:#fff;font:inherit;font-weight:700;cursor:pointer;touch-action:manipulation;';
+    button.addEventListener('click', () => {
+      if (!stopped) input.click();
     });
-    return { stop };
+
+    const status = document.createElement('div');
+    status.style.cssText = 'font-size:12px;color:#cbd5e1;min-height:20px;';
+
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      input.value = '';
+      if (!file || stopped) return;
+      button.disabled = true;
+      status.textContent = 'جاري قراءة الباركود من الصورة...';
+      try {
+        const value = await decodeBarcodeImage(file);
+        if (!value) throw new Error('BARCODE_NOT_FOUND');
+        if (!continuous) await stop();
+        onDetected(value);
+        if (continuous && !stopped) status.textContent = 'تمت القراءة. يمكنك تصوير باركود آخر.';
+      } catch (error) {
+        const fallbackMessage = String(error?.message || '') === 'BARCODE_NOT_FOUND'
+          ? 'لم يظهر باركود واضح في الصورة. قرّب الكاميرا وحاول مرة أخرى.'
+          : getErrorMessage(error);
+        status.textContent = fallbackMessage;
+        onError?.(error, fallbackMessage);
+      } finally {
+        if (!stopped) button.disabled = false;
+      }
+    });
+
+    box.append(icon, text, button, input, status);
+    container.appendChild(box);
+
+    async function stop() {
+      if (stopped) return;
+      stopped = true;
+      input.value = '';
+      clearContainer(container);
+    }
+
+    return { stop, mode: 'photo-fallback' };
   }
 
   async function startCameraScanner(options = {}) {
@@ -185,6 +386,7 @@
     let controller = null;
     let cancelled = false;
     const pendingController = {
+      get mode() { return controller?.mode || 'starting'; },
       async stop() {
         cancelled = true;
         if (controller?.stop) await controller.stop();
@@ -193,27 +395,42 @@
     };
 
     try {
-      if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-        throw Object.assign(new Error('INSECURE_CONTEXT'), { name: 'SecurityError' });
-      }
-      await requestPermission();
-      if (cancelled) return pendingController;
+      ensureSecureCameraContext();
       const detected = value => {
-        if (!value) return;
+        if (!value || cancelled) return;
         if (options.sound !== false) playCameraSound(options.soundUrl || 'qr.mp3');
         onDetected(value);
       };
       const continuous = options.continuous === true;
-      if ('BarcodeDetector' in window) {
-        controller = await startNativeScanner(container, detected, onError, continuous);
+
+      // لا نطلب getUserMedia مرتين. هذا مهم خصوصاً على iPhone/WebKit.
+      // نستخدم BarcodeDetector إن كان متاحاً، وإلا ننتقل مباشرة إلى html5-qrcode.
+      if ('BarcodeDetector' in window && !IS_IOS) {
+        try {
+          controller = await startNativeScanner(container, detected, onError, continuous);
+        } catch (nativeError) {
+          if (isPermissionError(nativeError)) throw nativeError;
+          controller = await startHtml5Scanner(container, detected, onError, continuous);
+        }
       } else {
+        // على iPhone/iPad نفضّل ZXing داخل html5-qrcode لدعم باركود المتاجر 1D بصورة أوسع.
         controller = await startHtml5Scanner(container, detected, onError, continuous);
       }
+
       if (cancelled) await controller.stop();
       return pendingController;
     } catch (error) {
       clearContainer(container);
-      onError(error, getErrorMessage(error));
+      const message = getErrorMessage(error);
+      onError(error, message);
+      if (options.photoFallback !== false) {
+        controller = createPhotoFallback(container, value => {
+          if (options.sound !== false) playCameraSound(options.soundUrl || 'qr.mp3');
+          onDetected(value);
+        }, onError, options.continuous === true, message);
+        if (cancelled) await controller.stop();
+        return pendingController;
+      }
       throw error;
     }
   }
@@ -298,6 +515,7 @@
     bindHardwareScanner,
     bindBarcodeFieldEnter,
     playCameraSound,
-    getErrorMessage
+    getErrorMessage,
+    isIOS: IS_IOS
   };
 })();

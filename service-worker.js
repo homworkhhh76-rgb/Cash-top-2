@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_VERSION = 'v34-cross-branch-warehouse-transfer';
+const CACHE_VERSION = 'v35-ios-camera-fast-cache';
 const APP_CACHE = `cash-top-2-app-${CACHE_VERSION}`;
 const REMOTE_STATIC_CACHE = `cash-top-2-remote-static-${CACHE_VERSION}`;
 
@@ -74,7 +74,7 @@ const REMOTE_STATIC_ASSETS = [
   'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
   'https://cdn.jsdelivr.net/npm/chart.js',
   'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js',
-  'https://unpkg.com/html5-qrcode'
+  'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'
 ];
 
 const REMOTE_STATIC_HOSTS = new Set([
@@ -162,8 +162,11 @@ async function cacheRemoteCssDependencies(cache, styleUrl, response) {
 async function warmRemoteStaticAssets() {
   const cache = await caches.open(REMOTE_STATIC_CACHE);
   await Promise.allSettled(REMOTE_STATIC_ASSETS.map(async url => {
+    const lookupRequest = new Request(url, { mode: 'cors' });
+    const existing = await cache.match(lookupRequest, { ignoreSearch: false });
+    if (existing) return;
     const request = new Request(url, { mode: 'cors', cache: 'reload' });
-    const response = await fetchWithDeadline(request);
+    const response = await fetchWithDeadline(request, {}, 6000);
     await putIfUsable(cache, request, response);
     if (url.includes('fonts.googleapis.com') || url.endsWith('.css')) {
       await cacheRemoteCssDependencies(cache, url, response);
@@ -195,8 +198,8 @@ async function ensureLocalShell() {
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
+    // الصفحات والملفات المحلية أولاً حتى يصبح الإصدار الجديد جاهزاً بسرعة.
     await installCompleteLocalShell();
-    await warmRemoteStaticAssets();
     await self.skipWaiting();
   })());
 });
@@ -213,10 +216,23 @@ self.addEventListener('activate', event => {
   })());
 });
 
+function canonicalLocalRequest(request) {
+  const url = new URL(request.url);
+  url.search = '';
+  url.hash = '';
+  return new Request(url.href, {
+    method: 'GET',
+    credentials: 'same-origin'
+  });
+}
+
 async function refreshLocalCache(request, cache) {
   try {
     const response = await fetch(request, { cache: 'no-store' });
-    if (response && response.ok) await cache.put(request, response.clone());
+    if (response && response.ok) {
+      // نحفظ دائماً تحت رابط ثابت بلا ?v= حتى تستبدل النسخة القديمة فعلياً.
+      await cache.put(canonicalLocalRequest(request), response.clone());
+    }
     return response;
   } catch (_) {
     return null;
@@ -225,7 +241,8 @@ async function refreshLocalCache(request, cache) {
 
 async function localCacheFirst(request) {
   const cache = await caches.open(APP_CACHE);
-  const cached = await cache.match(request, { ignoreSearch: true });
+  const cacheKey = canonicalLocalRequest(request);
+  const cached = await cache.match(cacheKey);
 
   // اعرض النسخة المحلية فوراً حتى مع وجود الإنترنت.
   if (cached) return cached;
@@ -238,10 +255,9 @@ async function localCacheFirst(request) {
   return Response.error();
 }
 
-
 async function refreshCachedLocalInBackground(request) {
   const cache = await caches.open(APP_CACHE);
-  const cached = await cache.match(request, { ignoreSearch: true });
+  const cached = await cache.match(canonicalLocalRequest(request));
   if (!cached) return;
   await refreshLocalCache(request, cache);
 }
@@ -294,7 +310,8 @@ self.addEventListener('message', event => {
       if (source && typeof source.postMessage === 'function') {
         source.postMessage({ type: 'CASHTOP_CACHE_STATUS', ...result, cache: APP_CACHE });
       }
-      /* لا نعيد طلب المكتبات الخارجية عند كل صفحة؛ تم حفظها أثناء التثبيت. */
+      // المكتبات الخارجية (ومنها قارئ الباركود للآيفون) تُحفظ مرة واحدة فقط في الخلفية.
+      await warmRemoteStaticAssets();
     })());
   }
 });

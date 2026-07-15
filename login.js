@@ -534,6 +534,16 @@
     displayReason();
   });
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' }).catch(console.warn));
+    (async () => {
+      try {
+        const registration = await navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
+        const worker = registration.active || registration.waiting || registration.installing;
+        worker?.postMessage?.({ type: 'VERIFY_CACHE' });
+        const ready = await navigator.serviceWorker.ready;
+        ready.active?.postMessage?.({ type: 'WARM_CACHE' });
+      } catch (error) {
+        console.warn('[CASH TOP 2] SW:', error);
+      }
+    })();
   }
 })();
