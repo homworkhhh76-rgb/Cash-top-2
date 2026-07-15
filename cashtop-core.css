@@ -1084,3 +1084,20 @@ html.ct-app-page body,
   .ct-page-host #cameraModal .modal-box { width: min(92vw, 400px) !important; max-width: 400px !important; }
   .ct-page-host #scannerModal .modal-box { width: min(92vw, 500px) !important; max-width: 500px !important; }
 }
+
+
+/* إزالة الوميض/الظل الأزرق عند الضغط على العناصر التفاعلية في الجوال والمتصفح */
+html, body, a, button, input, select, textarea, [role="button"], [tabindex] {
+  -webkit-tap-highlight-color: transparent !important;
+}
+a:focus, a:active,
+button:focus, button:active,
+input[type="button"]:focus, input[type="button"]:active,
+input[type="submit"]:focus, input[type="submit"]:active,
+input:focus, input:active,
+select:focus, select:active,
+textarea:focus, textarea:active,
+[role="button"]:focus, [role="button"]:active {
+  outline: none !important;
+  box-shadow: none !important;
+}

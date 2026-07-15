@@ -1211,6 +1211,7 @@
                     unitName: product.unitName || 'وحدة', 
                     pieceName: product.pieceName || 'قطعة',
                     piecesPerUnit: 1, // المقاسات تباع بالقطعة عادة
+                    hasSaleUnit: false,
                     isCustom: false,
                     isVariant: true,
                     variantSize: variant.size,
@@ -1244,8 +1245,8 @@
             } else {
                 basketItems.push({ 
                     id: product.id, name: product.name, price: itemPrice, referencePrice: itemPrice, cost: product.cost, qty: incrementQty, 
-                    selectedUnit: 'piece', unitName: product.unitName || 'وحدة', pieceName: product.pieceName || 'قطعة',
-                    piecesPerUnit: product.piecesPerUnit || 1, isCustom: false, isVariant: false
+                    selectedUnit: 'piece', unitName: product.unitName || '', pieceName: product.pieceName || 'قطعة',
+                    piecesPerUnit: product.piecesPerUnit || 1, hasSaleUnit: productSupportsSaleUnit(product), isCustom: false, isVariant: false
                 });
             }
             renderBasket();
@@ -1262,7 +1263,7 @@
             basketItems.push({ 
                 id: `CUSTOM_${Date.now()}`, 
                 name: name, price: price, referencePrice: price, cost: cost, qty: stock, 
-                selectedUnit: 'piece', unitName: 'وحدة', pieceName: 'قطعة', piecesPerUnit: 1, isCustom: true, isVariant: false 
+                selectedUnit: 'piece', unitName: '', pieceName: 'قطعة', piecesPerUnit: 1, hasSaleUnit: false, isCustom: true, isVariant: false 
             });
 
             renderBasket();
@@ -1295,10 +1296,13 @@
                 } else if (item.isVariant) {
                     unitSelectorHtml = `<span class="badge-variant-info">مخصص</span>`;
                 } else {
+                    const hasSaleUnit = basketItemSupportsSaleUnit(item);
+                    item.hasSaleUnit = hasSaleUnit;
+                    if (!hasSaleUnit && item.selectedUnit !== 'piece') item.selectedUnit = 'piece';
                     unitSelectorHtml = `
                         <select class="unit-select" onchange="updateItemUnit(${index}, this.value)">
-                            <option value="piece" ${item.selectedUnit === 'piece' ? 'selected' : ''}>${item.pieceName}</option>
-                            <option value="unit" ${item.selectedUnit === 'unit' ? 'selected' : ''}>${item.unitName}</option>
+                            <option value="piece" ${item.selectedUnit === 'piece' ? 'selected' : ''}>${item.pieceName || 'قطعة'}</option>
+                            ${hasSaleUnit ? `<option value="unit" ${item.selectedUnit === 'unit' ? 'selected' : ''}>${item.unitName || 'وحدة'}</option>` : ''}
                         </select>
                     `;
                 }
@@ -1334,7 +1338,12 @@
 
         function updateItemUnit(index, value) { 
             let item = basketItems[index];
-            if(item.isCustom || item.isVariant) return; 
+            if(item.isCustom || item.isVariant) return;
+            if (value === 'unit' && !basketItemSupportsSaleUnit(item)) {
+                item.selectedUnit = 'piece';
+                renderBasket();
+                return;
+            }
 
             let oldUnit = item.selectedUnit;
             if(oldUnit === value) return;
@@ -1899,17 +1908,52 @@
         function findBarcodeMatch(code) {
             const normalized = normalizeBarcode(code);
             if (!normalized) return null;
+
+            // أولوية القراءة دائماً للقطعة. إذا كان نفس الباركود مستخدماً للقطعة
+            // والكرتونة/الوحدة (حتى عبر بيانات قديمة)، نضيف قطعة ولا نحوّله لكرتونة.
             for (const product of productsData) {
-                const pieceCodes = [product.barcode, product.pieceBarcode].filter(Boolean).map(String);
-                const unitCodes = [product.unitBarcode].filter(Boolean).map(String);
-                if (unitCodes.includes(normalized)) return { type: 'unit', product };
-                if (pieceCodes.includes(normalized)) return { type: product.hasVariants ? 'variants' : 'piece', product };
+                const pieceCodes = [product.barcode, product.pieceBarcode]
+                    .filter(Boolean)
+                    .map(value => normalizeBarcode(value));
+                if (pieceCodes.includes(normalized)) {
+                    return { type: product.hasVariants ? 'variants' : 'piece', product };
+                }
+            }
+
+            // باركود المقاس/اللون يعتبر بيعاً بالقطعة أيضاً، لذلك يسبق باركود الكرتونة.
+            for (const product of productsData) {
                 if (product.hasVariants && Array.isArray(product.variants)) {
-                    const variantIndex = product.variants.findIndex(variant => String(variant?.barcode || '') === normalized);
+                    const variantIndex = product.variants.findIndex(
+                        variant => normalizeBarcode(variant?.barcode) === normalized
+                    );
                     if (variantIndex >= 0) return { type: 'variant', product, variantIndex };
                 }
             }
+
+            // لا نختار الكرتونة/الوحدة إلا عندما لا يوجد أي تطابق لنفس الباركود كقطعة.
+            for (const product of productsData) {
+                const unitCodes = [product.unitBarcode]
+                    .filter(Boolean)
+                    .map(value => normalizeBarcode(value));
+                if (unitCodes.includes(normalized)) return { type: 'unit', product };
+            }
             return null;
+        }
+
+        function productSupportsSaleUnit(product) {
+            if (!product) return false;
+            if (String(product.addType || '').toLowerCase() === 'unit') return true;
+            // دعم البيانات القديمة التي سبقت حقل addType إذا كانت الوحدة معرفة فعلياً بأكثر من قطعة.
+            if (!product.addType && Number(product.piecesPerUnit || 1) > 1 && String(product.unitName || '').trim()) return true;
+            return false;
+        }
+
+        function basketItemSupportsSaleUnit(item) {
+            if (!item || item.isCustom || item.isVariant) return false;
+            if (item.selectedUnit === 'unit') return true;
+            if (typeof item.hasSaleUnit === 'boolean') return item.hasSaleUnit;
+            const product = productsData.find(product => String(product.id) === String(item.id));
+            return productSupportsSaleUnit(product);
         }
 
         function addToBasketUnit(productId) {
@@ -1935,6 +1979,7 @@
                 unitName: product.unitName || 'وحدة',
                 pieceName: product.pieceName || 'قطعة',
                 piecesPerUnit,
+                hasSaleUnit: true,
                 isCustom: false,
                 isVariant: false
             });
@@ -1952,9 +1997,9 @@
             }
             let added = false;
             if (match.type === 'unit') added = addToBasketUnit(match.product.id);
-            else if (match.type === 'piece') { addToBasket(match.product.id); added = true; }
+            else if (match.type === 'piece') added = addToBasket(match.product.id) === true;
             else if (match.type === 'variants') { openVariantModal(match.product.id); added = true; }
-            else if (match.type === 'variant') { addToBasketVariant(match.product.id, match.variantIndex); added = true; }
+            else if (match.type === 'variant') added = addToBasketVariant(match.product.id, match.variantIndex) === true;
             if (added && source === 'camera') showToast(`تمت قراءة وإضافة [${match.product.name}]`, 'success');
             const directInput = document.getElementById('barcodeDirectInput');
             if (directInput) directInput.value = '';
@@ -1992,10 +2037,12 @@
                     container: 'cashierCameraReader',
                     sound: true,
                     soundUrl: 'qr.mp3',
+                    continuous: true,
                     onDetected: code => {
-                        cashierCameraController = null;
-                        processBarcodeCode(code, 'camera');
-                        closeModal('cameraModal');
+                        const added = processBarcodeCode(code, 'camera');
+                        if (status) status.textContent = added
+                            ? 'تمت الإضافة. الكاميرا ما زالت تعمل ويمكنك مسح صنف آخر.'
+                            : 'لم تتم الإضافة. الكاميرا ما زالت تعمل ويمكنك المحاولة بباركود آخر.';
                     },
                     onError: (error, message) => {
                         console.error('[CASH TOP 2] cashier camera:', error);

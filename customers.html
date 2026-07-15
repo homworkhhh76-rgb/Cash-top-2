@@ -106,6 +106,56 @@
         .statement-details { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 20px; }
         .statement-balance { font-size: 18px; font-weight: bold; text-align: center; margin-top: 20px; padding: 10px; background: #f4f6f9; border-radius: 5px; }
 
+
+        /* سجل العميل والحركات المالية */
+        .btn-history-act { color: #605ca8; }
+        .btn-history-act:hover { background: rgba(96,92,168,0.1); }
+        .history-modal-box { max-width: 1050px; border-top-color: #605ca8; padding: 0; overflow: hidden; }
+        .history-modal-box .modal-header { margin: 0; padding: 16px 20px; background: linear-gradient(135deg, #605ca8, #4b4885); color: #fff; border: 0; }
+        .history-modal-box .modal-title { color: #fff; display: flex; align-items: center; gap: 8px; }
+        .history-modal-box .modal-close { color: rgba(255,255,255,.9); }
+        .history-modal-body { padding: 18px 20px 8px; overflow-y: auto; max-height: calc(90vh - 150px); }
+        .history-customer-head { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+        .history-customer-name { font-size: 18px; font-weight: 800; color: #2f3340; }
+        .history-customer-meta { color: #7b8493; font-size: 12px; margin-top: 2px; }
+        .history-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+        .history-summary-card { border: 1px solid #e8e9ee; border-radius: 8px; padding: 10px 12px; background: #fafbfc; }
+        .history-summary-card span { display: block; color: #7b8493; font-size: 11px; margin-bottom: 3px; }
+        .history-summary-card strong { display: block; color: #333; font-size: 15px; overflow-wrap: anywhere; }
+        .history-table-wrap { border: 1px solid #e7e9ed; border-radius: 8px; overflow: auto; background: #fff; }
+        .history-table { width: 100%; border-collapse: collapse; min-width: 820px; font-size: 12px; text-align: center; }
+        .history-table th { background: #f5f4fb; color: #4b4885; padding: 10px 8px; border-bottom: 1px solid #ddd; white-space: nowrap; }
+        .history-table td { padding: 9px 8px; border-bottom: 1px solid #f0f1f3; vertical-align: top; }
+        .history-table td.history-desc { text-align: right; white-space: normal; min-width: 210px; }
+        .history-type { display: inline-flex; align-items: center; justify-content: center; padding: 3px 7px; border-radius: 10px; font-weight: 700; font-size: 10px; background: #f1f2f6; color: #555; white-space: nowrap; }
+        .history-type.invoice { background: #eef4ff; color: #2d6cdf; }
+        .history-type.payment { background: #e8f7ef; color: #008f4d; }
+        .history-type.debt { background: #fdecea; color: #c0392b; }
+        .history-type.opening { background: #f3efff; color: #605ca8; }
+        .history-empty { text-align: center; color: #999; padding: 34px 12px; }
+        .history-modal-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 13px 20px; border-top: 1px solid #eceef1; background: #fafafa; flex-wrap: wrap; }
+        .history-export-actions { display: flex; gap: 8px; }
+        .history-export-btn { border: 0; color: #fff; padding: 8px 16px; border-radius: 5px; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; font-family: inherit; font-weight: 700; }
+        .history-export-btn.excel { background: #00a65a; }
+        .history-export-btn.pdf { background: #dd4b39; }
+        .history-close-btn { border: 1px solid #d5d7dc; background: #fff; color: #555; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-family: inherit; }
+        .ct-export-render-host { position: fixed; left: -20000px; top: 0; width: 794px; z-index: -9999; background: #fff; }
+        .ct-export-page { width: 794px; min-height: 1123px; padding: 42px 42px 34px; background: #fff; color: #222; direction: rtl; font-family: 'Cairo', sans-serif; }
+        .ct-export-page.landscape { width: 1123px; min-height: 794px; }
+        .ct-export-head { text-align: center; border-bottom: 2px solid #605ca8; padding-bottom: 12px; margin-bottom: 14px; }
+        .ct-export-head h2 { margin: 0 0 4px; color: #4b4885; font-size: 21px; }
+        .ct-export-head p { margin: 0; color: #777; font-size: 11px; }
+        .ct-export-meta { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 12px; font-size: 11px; }
+        .ct-export-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+        .ct-export-summary div { border: 1px solid #e4e6ea; border-radius: 6px; padding: 8px; text-align: center; background: #fafafa; }
+        .ct-export-summary span { display: block; color: #777; font-size: 10px; }
+        .ct-export-summary strong { font-size: 13px; color: #333; }
+        .ct-export-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        .ct-export-table th { background: #605ca8; color: #fff; padding: 7px 5px; border: 1px solid #504d8d; }
+        .ct-export-table td { padding: 6px 5px; border: 1px solid #dedfe3; text-align: center; vertical-align: top; }
+        .ct-export-table td.desc { text-align: right; }
+        .ct-export-footer { margin-top: 14px; border-top: 1px solid #ddd; padding-top: 8px; display: flex; justify-content: space-between; color: #888; font-size: 9px; }
+
         @media (max-width: 768px) {
             body { padding: 10px; }
             .top-cards-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 10px; }
@@ -293,10 +343,8 @@
             <div class="table-header-wrapper">
                 <div class="table-title">سجل جرد ومراقبة حسابات العملاء</div>
                 <div class="export-group">
-                    <button class="btn-export excel" onclick="exportTableToExcel()"><i class="fa-solid fa-file-excel"></i> اكسل</button>
-                    <button class="btn-export pdf" onclick="exportTableToPDF()"><i class="fa-solid fa-file-pdf"></i> PDF</button>
-                    <button class="btn-export image" onclick="exportTableToImage()"><i class="fa-solid fa-image"></i> صورة</button>
-                    <button class="btn-export" onclick="window.print()"><i class="fa-solid fa-print"></i> طباعة</button>
+                    <button type="button" class="btn-export excel" onclick="exportTableToExcel()"><i class="fa-solid fa-file-excel"></i> ديون العملاء Excel</button>
+                    <button type="button" class="btn-export pdf" onclick="exportTableToPDF()"><i class="fa-solid fa-file-pdf"></i> ديون العملاء PDF</button>
                 </div>
             </div>
             
@@ -385,6 +433,54 @@
                     <button type="submit" class="btn-submit">حفظ العميل</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+
+    <!-- النافذة المنبثقة: سجل العميل المالي -->
+    <div class="modal-overlay" id="customerHistoryModal">
+        <div class="modal-box history-modal-box">
+            <div class="modal-header">
+                <div class="modal-title"><i class="fa-solid fa-clock-rotate-left"></i> سجل العميل المالي</div>
+                <button type="button" class="modal-close" onclick="closeCustomerHistory()">&times;</button>
+            </div>
+            <div class="history-modal-body">
+                <div class="history-customer-head">
+                    <div>
+                        <div class="history-customer-name" id="historyCustomerName">-</div>
+                        <div class="history-customer-meta" id="historyCustomerMeta">-</div>
+                    </div>
+                </div>
+                <div class="history-summary-grid">
+                    <div class="history-summary-card"><span>الرصيد الحالي</span><strong id="historyCurrentBalance">0.00 ₪</strong></div>
+                    <div class="history-summary-card"><span>عدد الفواتير</span><strong id="historyInvoicesCount">0</strong></div>
+                    <div class="history-summary-card"><span>إجمالي الديون والحركات المدينة</span><strong id="historyDebtTotal">0.00 ₪</strong></div>
+                    <div class="history-summary-card"><span>إجمالي السداد</span><strong id="historyPaymentTotal">0.00 ₪</strong></div>
+                </div>
+                <div class="history-table-wrap">
+                    <table class="history-table">
+                        <thead>
+                            <tr>
+                                <th>التاريخ</th>
+                                <th>نوع الحركة</th>
+                                <th>المرجع</th>
+                                <th>البيان</th>
+                                <th>مدين (+)</th>
+                                <th>سداد (-)</th>
+                                <th>الرصيد</th>
+                            </tr>
+                        </thead>
+                        <tbody id="customerHistoryTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="history-modal-footer">
+                <button type="button" class="history-close-btn" onclick="closeCustomerHistory()">إغلاق</button>
+                <div class="history-export-actions">
+                    <button type="button" class="history-export-btn excel" onclick="exportCustomerHistoryExcel()"><i class="fa-solid fa-file-excel"></i> Excel</button>
+                    <button type="button" class="history-export-btn pdf" onclick="exportCustomerHistoryPDF()"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -529,6 +625,7 @@
                         <div class="actions-wrapper">
                             <button type="button" class="action-btn btn-whatsapp" data-customer-action="wa" data-customer-id="${escapeHtml(safeId)}" title="مراسلة واتساب"><i class="fa-brands fa-whatsapp"></i></button>
                             <button type="button" class="action-btn btn-sms" data-customer-action="sms" data-customer-id="${escapeHtml(safeId)}" title="رسالة SMS"><i class="fa-solid fa-comment-sms"></i></button>
+                            <button type="button" class="action-btn btn-history-act" data-customer-action="history" data-customer-id="${escapeHtml(safeId)}" title="سجل العميل"><i class="fa-solid fa-clock-rotate-left"></i></button>
                             <button type="button" class="action-btn btn-pdf-act" data-customer-action="pdf" data-customer-id="${escapeHtml(safeId)}" title="تحميل كشف PDF"><i class="fa-solid fa-file-pdf"></i></button>
                             <button type="button" class="action-btn btn-image-act" data-customer-action="image" data-customer-id="${escapeHtml(safeId)}" title="حفظ كصورة"><i class="fa-solid fa-image"></i></button>
                             <button type="button" class="action-btn btn-edit-act" data-customer-action="edit" data-customer-id="${escapeHtml(safeId)}" title="تعديل"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -596,6 +693,13 @@
                     if (event.target === modal) closeModal();
                 });
             }
+            const historyModal = document.getElementById('customerHistoryModal');
+            if (historyModal && historyModal.dataset.bound !== 'true') {
+                historyModal.dataset.bound = 'true';
+                historyModal.addEventListener('pointerdown', event => {
+                    if (event.target === historyModal) closeCustomerHistory();
+                });
+            }
             const tableBody = document.getElementById('customersTableBody');
             if (tableBody && tableBody.dataset.actionsBound !== 'true') {
                 tableBody.dataset.actionsBound = 'true';
@@ -613,6 +717,7 @@
                     }
                     if (action === 'edit') editCustomer(id);
                     else if (action === 'delete') deleteCustomer(id);
+                    else if (action === 'history') openCustomerHistory(id);
                     else if (action === 'pdf') exportRowPDF(id);
                     else if (action === 'image') exportRowImage(id);
                     else if (action === 'wa' || action === 'sms') sendMsg(customer.phone || '', customer.name || '', Number(customer.balance || 0), action);
@@ -783,13 +888,311 @@
 
 
         // ==========================================
-        // وظائف التصدير للجدول بالكامل (علوية)
+        // سجل العميل + تصدير الديون والسجلات
         // ==========================================
+        let activeHistoryCustomerId = '';
+        let activeHistoryRows = [];
+
+        function numeric(value) {
+            const number = Number(value || 0);
+            return Number.isFinite(number) ? number : 0;
+        }
+
+        function formatMoney(value) {
+            return `${numeric(value).toFixed(2)} ₪`;
+        }
+
+        function formatHistoryDate(value) {
+            if (!value) return '-';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return String(value);
+            return date.toLocaleString('en-GB');
+        }
+
+        function sanitizeFileName(value) {
+            return String(value || 'عميل').replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '_');
+        }
+
+        function sameCustomer(record, customer, idKeys = ['customerId'], nameKeys = ['customer']) {
+            const customerId = String(customer?.id || '');
+            const customerName = String(customer?.name || '').trim();
+            const recordIds = idKeys.map(key => String(record?.[key] || '')).filter(Boolean);
+            if (recordIds.length) return Boolean(customerId && recordIds.includes(customerId));
+            return Boolean(customerName && nameKeys.some(key => String(record?.[key] || '').trim() === customerName));
+        }
+
+        function getCustomerHistoryRows(customer) {
+            if (!customer) return [];
+            const invoices = readArray('cashtop_invoices');
+            const vouchers = readArray('cashtop_vouchers');
+            const rows = [];
+            const invoiceIds = new Set();
+
+            invoices.filter(invoice => sameCustomer(invoice, customer, ['customerId'], ['customer'])).forEach(invoice => {
+                const debt = Math.max(0, numeric(invoice.debt));
+                invoiceIds.add(String(invoice.id || ''));
+                rows.push({
+                    date: invoice.date || invoice.createdAt || '',
+                    sortTime: Date.parse(invoice.date || invoice.createdAt || '') || 0,
+                    type: 'invoice',
+                    typeLabel: debt > 0 ? 'فاتورة + دين' : 'فاتورة بيع',
+                    reference: invoice.id || '-',
+                    description: `فاتورة مبيعات — الإجمالي ${formatMoney(invoice.total)}، المدفوع ${formatMoney(invoice.paid)}، الدين ${formatMoney(debt)}`,
+                    debit: debt,
+                    credit: 0
+                });
+            });
+
+            vouchers.filter(voucher => {
+                if (String(voucher?.relationType || '') !== 'client') return false;
+                return sameCustomer(voucher, customer, ['relationId'], ['relationName']);
+            }).forEach(voucher => {
+                const amount = Math.max(0, numeric(voucher.amount));
+                const isPayment = String(voucher.type || '') === 'قبض';
+                rows.push({
+                    date: voucher.date || voucher.updatedAt || '',
+                    sortTime: Date.parse(voucher.date || voucher.updatedAt || '') || 0,
+                    type: isPayment ? 'payment' : 'debt',
+                    typeLabel: isPayment ? 'سداد / سند قبض' : 'سحب دين / سند صرف',
+                    reference: voucher.refNumber || voucher.id || '-',
+                    description: voucher.notes || (isPayment ? 'سداد من العميل وتخفيض المديونية' : 'صرف للعميل وزيادة المديونية'),
+                    debit: isPayment ? 0 : amount,
+                    credit: isPayment ? amount : 0
+                });
+            });
+
+            (Array.isArray(customer.debtInvoices) ? customer.debtInvoices : []).forEach(entry => {
+                const invoiceId = String(entry?.invoiceId || '');
+                if (invoiceId && invoiceIds.has(invoiceId)) return;
+                const amount = Math.max(0, numeric(entry?.amount ?? entry?.remaining));
+                if (!amount) return;
+                rows.push({
+                    date: entry.date || customer.createdAt || '',
+                    sortTime: Date.parse(entry.date || customer.createdAt || '') || 0,
+                    type: 'debt',
+                    typeLabel: 'دين مسجل',
+                    reference: invoiceId || entry.id || '-',
+                    description: 'دين محفوظ في سجل العميل من إصدار سابق',
+                    debit: amount,
+                    credit: 0
+                });
+            });
+
+            rows.sort((a, b) => a.sortTime - b.sortTime || String(a.reference).localeCompare(String(b.reference)));
+            const movementBalance = rows.reduce((sum, row) => sum + numeric(row.debit) - numeric(row.credit), 0);
+            const currentBalance = numeric(customer.balance);
+            const openingAdjustment = currentBalance - movementBalance;
+            if (Math.abs(openingAdjustment) > 0.005) {
+                rows.unshift({
+                    date: customer.createdAt || '',
+                    sortTime: (Date.parse(customer.createdAt || '') || 0) - 1,
+                    type: 'opening',
+                    typeLabel: 'رصيد مرحّل',
+                    reference: '-',
+                    description: 'رصيد افتتاحي أو تعديل مباشر سابق لضمان مطابقة السجل مع الرصيد الحالي',
+                    debit: openingAdjustment > 0 ? openingAdjustment : 0,
+                    credit: openingAdjustment < 0 ? Math.abs(openingAdjustment) : 0
+                });
+            }
+
+            let running = 0;
+            return rows.map(row => {
+                running += numeric(row.debit) - numeric(row.credit);
+                return { ...row, balance: running };
+            });
+        }
+
+        function getCustomerDebtRows() {
+            return customersData.map((customer, index) => {
+                const balance = numeric(customer.balance);
+                return {
+                    sequence: index + 1,
+                    name: String(customer.name || 'عميل بدون اسم'),
+                    phone: String(customer.phone || ''),
+                    debt: Math.max(0, balance),
+                    credit: Math.max(0, -balance),
+                    balance,
+                    status: balance > 0 ? 'مدين' : balance < 0 ? 'دائن' : 'متوازن'
+                };
+            });
+        }
+
+        function openCustomerHistory(id) {
+            const customer = customersData.find(item => String(item?.id) === String(id));
+            if (!customer) return showToast('تعذر العثور على العميل.', 'error');
+            activeHistoryCustomerId = String(customer.id || '');
+            activeHistoryRows = getCustomerHistoryRows(customer);
+
+            document.getElementById('historyCustomerName').textContent = customer.name || 'عميل بدون اسم';
+            document.getElementById('historyCustomerMeta').textContent = `${customer.phone || 'بدون رقم جوال'}${customer.address ? ` • ${customer.address}` : ''}`;
+            document.getElementById('historyCurrentBalance').textContent = formatMoney(customer.balance);
+            document.getElementById('historyInvoicesCount').textContent = String(activeHistoryRows.filter(row => row.type === 'invoice').length);
+            document.getElementById('historyDebtTotal').textContent = formatMoney(activeHistoryRows.reduce((sum, row) => sum + numeric(row.debit), 0));
+            document.getElementById('historyPaymentTotal').textContent = formatMoney(activeHistoryRows.reduce((sum, row) => sum + numeric(row.credit), 0));
+
+            const tbody = document.getElementById('customerHistoryTableBody');
+            if (!activeHistoryRows.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="history-empty">لا توجد حركات مالية مسجلة لهذا العميل حتى الآن.</td></tr>';
+            } else {
+                tbody.innerHTML = activeHistoryRows.slice().reverse().map(row => `
+                    <tr>
+                        <td>${escapeHtml(formatHistoryDate(row.date))}</td>
+                        <td><span class="history-type ${escapeHtml(row.type)}">${escapeHtml(row.typeLabel)}</span></td>
+                        <td>${escapeHtml(row.reference)}</td>
+                        <td class="history-desc">${escapeHtml(row.description)}</td>
+                        <td style="color:#c0392b;font-weight:700;">${row.debit ? escapeHtml(formatMoney(row.debit)) : '-'}</td>
+                        <td style="color:#008f4d;font-weight:700;">${row.credit ? escapeHtml(formatMoney(row.credit)) : '-'}</td>
+                        <td style="font-weight:800;">${escapeHtml(formatMoney(row.balance))}</td>
+                    </tr>
+                `).join('');
+            }
+            document.getElementById('customerHistoryModal')?.classList.add('active');
+        }
+
+        function closeCustomerHistory() {
+            document.getElementById('customerHistoryModal')?.classList.remove('active');
+        }
+
+        function createExportHost() {
+            const existing = document.querySelector('.ct-export-render-host');
+            existing?.remove();
+            const host = document.createElement('div');
+            host.className = 'ct-export-render-host';
+            document.body.appendChild(host);
+            return host;
+        }
+
+        function exportPageShell(title, subtitle, bodyHtml, pageNumber, pageCount, options = {}) {
+            const landscapeClass = options.landscape ? ' landscape' : '';
+            return `
+                <section class="ct-export-page${landscapeClass}">
+                    <div class="ct-export-head">
+                        <h2>${escapeHtml(title)}</h2>
+                        <p>${escapeHtml(subtitle)}</p>
+                    </div>
+                    ${options.metaHtml || ''}
+                    ${bodyHtml}
+                    <div class="ct-export-footer"><span>كاش توب 2</span><span>صفحة ${pageNumber} من ${pageCount}</span><span>${escapeHtml(new Date().toLocaleString('en-GB'))}</span></div>
+                </section>`;
+        }
+
+        async function exportHtmlPagesToPdf(pageHtmlList, fileName, orientation = 'p') {
+            if (!pageHtmlList.length) return;
+            const { jsPDF } = window.jspdf;
+            const host = createExportHost();
+            const pdf = new jsPDF(orientation, 'mm', 'a4');
+            try {
+                for (let i = 0; i < pageHtmlList.length; i++) {
+                    host.innerHTML = pageHtmlList[i];
+                    const page = host.firstElementChild;
+                    const canvas = await html2canvas(page, { scale: 1.6, backgroundColor: '#ffffff', useCORS: true, logging: false });
+                    const imgData = canvas.toDataURL('image/jpeg', 0.96);
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    if (i > 0) pdf.addPage('a4', orientation);
+                    pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
+                }
+                pdf.save(fileName);
+            } finally {
+                host.remove();
+            }
+        }
+
+        function buildDebtPdfPages(rows) {
+            const perPage = 22;
+            const chunks = [];
+            for (let i = 0; i < Math.max(rows.length, 1); i += perPage) chunks.push(rows.slice(i, i + perPage));
+            if (!chunks.length) chunks.push([]);
+            const totalDebt = rows.reduce((sum, row) => sum + row.debt, 0);
+            return chunks.map((chunk, index) => {
+                const tableRows = chunk.length ? chunk.map(row => `
+                    <tr><td>${row.sequence}</td><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.phone || '-')}</td><td>${escapeHtml(row.status)}</td><td>${row.debt.toFixed(2)} ₪</td><td>${row.credit.toFixed(2)} ₪</td></tr>
+                `).join('') : '<tr><td colspan="6">لا يوجد عملاء مسجلون</td></tr>';
+                const body = `
+                    <div class="ct-export-summary">
+                        <div><span>عدد العملاء</span><strong>${rows.length}</strong></div>
+                        <div><span>إجمالي الديون المستحقة</span><strong>${totalDebt.toFixed(2)} ₪</strong></div>
+                        <div><span>عدد العملاء المدينين</span><strong>${rows.filter(row => row.debt > 0).length}</strong></div>
+                    </div>
+                    <table class="ct-export-table"><thead><tr><th>#</th><th>اسم العميل</th><th>الجوال</th><th>الحالة</th><th>الدين المستحق</th><th>رصيد دائن</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+                return exportPageShell('تقرير ديون العملاء', 'قائمة كاملة بجميع العملاء وأرصدتهم — يتم توزيع الأسماء تلقائياً على عدة صفحات', body, index + 1, chunks.length);
+            });
+        }
+
         function exportTableToExcel() {
-            // إخفاء عمود الإجراءات قبل التصدير
-            let table = document.getElementById("customersTable");
-            let wb = XLSX.utils.table_to_book(table, { sheet: "العملاء" });
-            XLSX.writeFile(wb, `سجل_العملاء_${Date.now()}.xlsx`);
+            const rows = getCustomerDebtRows();
+            const data = rows.map(row => ({
+                '#': row.sequence,
+                'اسم العميل': row.name,
+                'رقم الجوال': row.phone,
+                'الحالة': row.status,
+                'الدين المستحق': row.debt,
+                'رصيد دائن': row.credit,
+                'الرصيد الصافي': row.balance
+            }));
+            const ws = XLSX.utils.json_to_sheet(data);
+            ws['!cols'] = [{wch:7},{wch:28},{wch:18},{wch:12},{wch:16},{wch:16},{wch:16}];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'ديون العملاء');
+            XLSX.writeFile(wb, `ديون_العملاء_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        async function exportTableToPDF() {
+            const rows = getCustomerDebtRows();
+            await exportHtmlPagesToPdf(buildDebtPdfPages(rows), `ديون_العملاء_${new Date().toISOString().slice(0,10)}.pdf`, 'p');
+        }
+
+        function exportCustomerHistoryExcel() {
+            const customer = customersData.find(item => String(item?.id) === String(activeHistoryCustomerId));
+            if (!customer) return showToast('افتح سجل العميل أولاً.', 'error');
+            const rows = getCustomerHistoryRows(customer);
+            const data = rows.map((row, index) => ({
+                '#': index + 1,
+                'التاريخ': formatHistoryDate(row.date),
+                'نوع الحركة': row.typeLabel,
+                'المرجع': row.reference,
+                'البيان': row.description,
+                'مدين (+)': numeric(row.debit),
+                'سداد (-)': numeric(row.credit),
+                'الرصيد بعد الحركة': numeric(row.balance)
+            }));
+            const ws = XLSX.utils.json_to_sheet(data);
+            ws['!cols'] = [{wch:7},{wch:22},{wch:20},{wch:20},{wch:55},{wch:15},{wch:15},{wch:18}];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'سجل العميل');
+            XLSX.writeFile(wb, `سجل_${sanitizeFileName(customer.name)}_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        function buildCustomerHistoryPdfPages(customer, rows) {
+            const perPage = 14;
+            const chunks = [];
+            for (let i = 0; i < Math.max(rows.length, 1); i += perPage) chunks.push(rows.slice(i, i + perPage));
+            if (!chunks.length) chunks.push([]);
+            const totalDebit = rows.reduce((sum, row) => sum + numeric(row.debit), 0);
+            const totalCredit = rows.reduce((sum, row) => sum + numeric(row.credit), 0);
+            return chunks.map((chunk, index) => {
+                const tableRows = chunk.length ? chunk.map(row => `
+                    <tr>
+                        <td>${escapeHtml(formatHistoryDate(row.date))}</td><td>${escapeHtml(row.typeLabel)}</td><td>${escapeHtml(row.reference)}</td>
+                        <td class="desc">${escapeHtml(row.description)}</td><td>${row.debit ? numeric(row.debit).toFixed(2) : '-'}</td><td>${row.credit ? numeric(row.credit).toFixed(2) : '-'}</td><td>${numeric(row.balance).toFixed(2)}</td>
+                    </tr>`).join('') : '<tr><td colspan="7">لا توجد حركات مالية مسجلة</td></tr>';
+                const meta = `<div class="ct-export-meta"><span><strong>العميل:</strong> ${escapeHtml(customer.name || '-')}</span><span><strong>الجوال:</strong> ${escapeHtml(customer.phone || '-')}</span><span><strong>الرصيد الحالي:</strong> ${escapeHtml(formatMoney(customer.balance))}</span></div>`;
+                const body = `
+                    <div class="ct-export-summary">
+                        <div><span>الحركات المدينة</span><strong>${totalDebit.toFixed(2)} ₪</strong></div>
+                        <div><span>إجمالي السداد</span><strong>${totalCredit.toFixed(2)} ₪</strong></div>
+                        <div><span>عدد الحركات</span><strong>${rows.length}</strong></div>
+                    </div>
+                    <table class="ct-export-table"><thead><tr><th>التاريخ</th><th>الحركة</th><th>المرجع</th><th>البيان</th><th>مدين</th><th>سداد</th><th>الرصيد</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+                return exportPageShell(`سجل العميل — ${customer.name || ''}`, 'كشف احترافي للفواتير والديون والسحب والسداد', body, index + 1, chunks.length, { landscape: true, metaHtml: meta });
+            });
+        }
+
+        async function exportCustomerHistoryPDF() {
+            const customer = customersData.find(item => String(item?.id) === String(activeHistoryCustomerId));
+            if (!customer) return showToast('افتح سجل العميل أولاً.', 'error');
+            const rows = getCustomerHistoryRows(customer);
+            await exportHtmlPagesToPdf(buildCustomerHistoryPdfPages(customer, rows), `سجل_${sanitizeFileName(customer.name)}_${new Date().toISOString().slice(0,10)}.pdf`, 'l');
         }
 
         function exportTableToImage() {

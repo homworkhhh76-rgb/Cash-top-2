@@ -45,7 +45,7 @@
     container.innerHTML = '';
   }
 
-  async function startNativeScanner(container, onDetected, onError) {
+  async function startNativeScanner(container, onDetected, onError, continuous = false) {
     const formats = typeof BarcodeDetector.getSupportedFormats === 'function'
       ? await BarcodeDetector.getSupportedFormats().catch(() => DEFAULT_FORMATS)
       : DEFAULT_FORMATS;
@@ -76,6 +76,8 @@
     let lastScanAt = 0;
     let animationFrame = 0;
     let busy = false;
+    let lastDetectedValue = '';
+    let lastDetectedAt = 0;
 
     const stop = async () => {
       if (stopped) return;
@@ -96,9 +98,17 @@
       try {
         const results = await detector.detect(video);
         const value = String(results?.[0]?.rawValue || '').trim();
+        const now = Date.now();
         if (value) {
-          await stop();
-          onDetected(value);
+          const isDuplicateStillInView = continuous && value === lastDetectedValue;
+          lastDetectedAt = now;
+          if (!isDuplicateStillInView) {
+            lastDetectedValue = value;
+            if (!continuous) await stop();
+            onDetected(value);
+          }
+        } else if (continuous && lastDetectedValue && now - lastDetectedAt > 650) {
+          lastDetectedValue = '';
         }
       } catch (error) {
         if (!stopped && String(error?.name || '') !== 'InvalidStateError') onError?.(error);
@@ -110,13 +120,15 @@
     return { stop };
   }
 
-  async function startHtml5Scanner(container, onDetected, onError) {
+  async function startHtml5Scanner(container, onDetected, onError, continuous = false) {
     if (typeof window.Html5Qrcode !== 'function') throw new Error('NO_BARCODE_ENGINE');
     if (!container.id) container.id = `ct_barcode_reader_${Date.now()}`;
     clearContainer(container);
     const instance = new window.Html5Qrcode(container.id);
     let stopped = false;
     let detected = false;
+    let lastDetectedValue = '';
+    let lastDetectedAt = 0;
 
     const stop = async () => {
       if (stopped) return;
@@ -137,12 +149,24 @@
         disableFlip: false
       },
       async decodedText => {
+        const value = String(decodedText || '').trim();
+        if (!value) return;
+        const now = Date.now();
+        if (continuous) {
+          lastDetectedAt = now;
+          if (value === lastDetectedValue) return;
+          lastDetectedValue = value;
+          onDetected(value);
+          return;
+        }
         if (detected) return;
         detected = true;
         await stop();
-        onDetected(String(decodedText || '').trim());
+        onDetected(value);
       },
-      () => {}
+      () => {
+        if (continuous && lastDetectedValue && Date.now() - lastDetectedAt > 650) lastDetectedValue = '';
+      }
     ).catch(error => {
       onError?.(error);
       throw error;
@@ -179,10 +203,11 @@
         if (options.sound !== false) playCameraSound(options.soundUrl || 'qr.mp3');
         onDetected(value);
       };
+      const continuous = options.continuous === true;
       if ('BarcodeDetector' in window) {
-        controller = await startNativeScanner(container, detected, onError);
+        controller = await startNativeScanner(container, detected, onError, continuous);
       } else {
-        controller = await startHtml5Scanner(container, detected, onError);
+        controller = await startHtml5Scanner(container, detected, onError, continuous);
       }
       if (cancelled) await controller.stop();
       return pendingController;
