@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_VERSION = 'v35-ios-camera-fast-cache';
+const CACHE_VERSION = 'v36-ios-barcode-decode-fix-cache';
 const APP_CACHE = `cash-top-2-app-${CACHE_VERSION}`;
 const REMOTE_STATIC_CACHE = `cash-top-2-remote-static-${CACHE_VERSION}`;
 

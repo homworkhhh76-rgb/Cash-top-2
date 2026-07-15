@@ -1,3 +1,12 @@
+# Revision 29 - فحوص إصلاح باركود iPhone
+
+- تم التحقق أن `barcode-tools.js` ينشئ `Html5Qrcode` بإعداد `useBarCodeDetectorIfSupported: !IS_IOS`، وبالتالي يستخدم iPhone/iPad محرك ZXing بدلاً من BarcodeDetector الأصلي.
+- تم التحقق من تطبيق نفس الإعداد على البث المباشر وقراءة ملفات الصور.
+- تم التحقق من تحديث روابط `barcode-tools.js?v=20` في الكاشير والمنتجات والمشتريات.
+- تم التحقق من تحديث Service Worker إلى `v36-ios-barcode-decode-fix-cache`.
+- تم إجراء فحص Syntax لملفات JavaScript وفحص سلامة حزمة ZIP.
+- لا تتوفر في بيئة الاختبار الحالية كاميرا iPhone فعلية، لذلك اختبار القراءة النهائي على عدسة iPhone يبقى اختبار جهاز حقيقي بعد النشر.
+
 # تقرير اختبار Revision 28
 
 - نجح فحص صياغة 13 ملف JavaScript مستقلاً بواسطة `node --check` دون أخطاء.

@@ -191,8 +191,58 @@
   function pickRearCamera(cameras) {
     const list = Array.isArray(cameras) ? cameras : [];
     if (!list.length) return null;
-    const rearPattern = /(back|rear|environment|world|traseira|arrière|hinten|خلف|خلفية)/i;
-    return list.find(camera => rearPattern.test(String(camera?.label || ''))) || list[list.length - 1] || list[0];
+    const scored = list.map((camera, index) => {
+      const label = String(camera?.label || '').toLowerCase();
+      let score = 0;
+      if (/(back|rear|environment|world|traseira|arrière|hinten|خلف|خلفية)/i.test(label)) score += 1000;
+      if (/(wide|واسع)/i.test(label)) score += 260;
+      if (/(ultra|0\.5|telephoto|tele|front|user|أمامي)/i.test(label)) score -= 520;
+      if (/(camera|كاميرا)/i.test(label)) score += 40;
+      return { camera, score, index };
+    });
+    scored.sort((a, b) => (b.score - a.score) || (b.index - a.index));
+    return scored[0]?.camera || list[list.length - 1] || list[0];
+  }
+
+  function getHtml5QrcodeFormats() {
+    const formats = window.Html5QrcodeSupportedFormats;
+    if (!formats) return undefined;
+    const preferredNames = [
+      'EAN_13', 'EAN_8', 'UPC_A', 'UPC_E',
+      'CODE_128', 'CODE_39', 'CODE_93', 'CODABAR', 'ITF',
+      'QR_CODE', 'DATA_MATRIX'
+    ];
+    const values = preferredNames
+      .map(name => formats[name])
+      .filter(value => typeof value === 'number');
+    return values.length ? values : undefined;
+  }
+
+  function createHtml5QrcodeReader(elementId) {
+    const config = {
+      verbose: false,
+      // مهم للآيفون: BarcodeDetector الأصلي في WebKit قد يفتح الكاميرا لكن يفشل
+      // في فك كثير من باركودات المتاجر 1D. نجبر html5-qrcode على ZXing في iOS.
+      useBarCodeDetectorIfSupported: !IS_IOS
+    };
+    const formats = getHtml5QrcodeFormats();
+    if (formats) config.formatsToSupport = formats;
+    return new window.Html5Qrcode(elementId, config);
+  }
+
+  async function optimizeVideoTrackForBarcode(container) {
+    const video = container?.querySelector?.('video');
+    const track = video?.srcObject?.getVideoTracks?.()?.[0];
+    if (!track) return;
+    try {
+      const capabilities = track.getCapabilities?.() || {};
+      const advanced = [];
+      if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
+        advanced.push({ focusMode: 'continuous' });
+      }
+      // لا نفرض Zoom مرتفعاً على iPhone Pro لأنه قد يزيد ضبابية الباركود القريب.
+      if (advanced.length) await track.applyConstraints({ advanced });
+    } catch (_) {}
   }
 
   async function startHtml5Scanner(container, onDetected, onError, continuous = false) {
@@ -200,7 +250,7 @@
     if (!container.id) container.id = `ct_barcode_reader_${Date.now()}`;
     clearContainer(container);
 
-    let instance = new window.Html5Qrcode(container.id, false);
+    let instance = createHtml5QrcodeReader(container.id);
     let stopped = false;
     let detected = false;
     let lastDetectedValue = '';
@@ -217,11 +267,23 @@
     };
 
     const scannerConfig = {
-      fps: IS_IOS ? 12 : 18,
-      qrbox: {
-        width: Math.min(320, Math.max(210, Number(container.clientWidth || 320) - 28)),
-        height: IS_IOS ? 180 : 165
-      },
+      // تقليل الضغط على WebKit يعطي ZXing وقتاً كافياً لتحليل كل إطار بدل إسقاط الإطارات.
+      fps: IS_IOS ? 10 : 18,
+      // منطقة عريضة ديناميكية لباركودات EAN/UPC/CODE128 الطويلة على شاشة الآيفون.
+      qrbox: IS_IOS
+        ? ((viewfinderWidth, viewfinderHeight) => {
+            const width = Math.max(180, Math.min(Math.floor(viewfinderWidth * 0.92), Math.floor(viewfinderWidth - 12)));
+            const height = Math.max(100, Math.min(
+              Math.floor(viewfinderHeight * 0.42),
+              Math.floor(viewfinderWidth * 0.48),
+              Math.floor(viewfinderHeight - 12)
+            ));
+            return { width, height };
+          })
+        : {
+            width: Math.min(320, Math.max(210, Number(container.clientWidth || 320) - 28)),
+            height: 165
+          },
       disableFlip: false
     };
 
@@ -249,8 +311,12 @@
     async function startWith(cameraConfig) {
       await instance.start(cameraConfig, scannerConfig, onSuccess, onScanFailure);
       tuneVideoForMobile(container);
+      await optimizeVideoTrackForBarcode(container);
       // بعض إصدارات WebKit تنشئ الفيديو بعد اكتمال start مباشرة بقليل.
-      setTimeout(() => tuneVideoForMobile(container), 80);
+      setTimeout(() => {
+        tuneVideoForMobile(container);
+        optimizeVideoTrackForBarcode(container);
+      }, 120);
     }
 
     try {
@@ -262,7 +328,7 @@
       const rear = pickRearCamera(cameras);
       if (!rear?.id) throw firstError;
       try { instance.clear(); } catch (_) {}
-      instance = new window.Html5Qrcode(container.id, false);
+      instance = createHtml5QrcodeReader(container.id);
       await startWith(rear.id);
     }
 
@@ -272,7 +338,7 @@
   async function decodeBarcodeImage(file) {
     if (!file) throw new Error('NO_IMAGE');
 
-    const detector = await createBarcodeDetector();
+    const detector = IS_IOS ? null : await createBarcodeDetector();
     if (detector && typeof createImageBitmap === 'function') {
       let bitmap = null;
       try {
@@ -296,7 +362,7 @@
       hidden.style.height = '1px';
       hidden.style.overflow = 'hidden';
       document.body.appendChild(hidden);
-      const reader = new window.Html5Qrcode(hidden.id, false);
+      const reader = createHtml5QrcodeReader(hidden.id);
       try {
         return String(await reader.scanFile(file, true) || '').trim();
       } finally {
