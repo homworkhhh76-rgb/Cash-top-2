@@ -1064,8 +1064,58 @@
     return true;
   }
 
+  function isStandaloneDisplayMode() {
+    return Boolean(window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true);
+  }
+
+  function normalizeViewportMeta() {
+    let viewport = document.querySelector('meta[name="viewport"]');
+    if (!viewport) {
+      viewport = document.createElement('meta');
+      viewport.name = 'viewport';
+      document.head.appendChild(viewport);
+    }
+    viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content';
+  }
+
+  function syncInstalledViewportMetrics() {
+    const viewport = window.visualViewport;
+    const height = Math.max(320, Math.round(viewport?.height || window.innerHeight || document.documentElement.clientHeight || 0));
+    if (height) document.documentElement.style.setProperty('--ct-visual-viewport-height', `${height}px`);
+  }
+
+  async function keepPortraitOrientation() {
+    if (!isStandaloneDisplayMode() || !screen.orientation || typeof screen.orientation.lock !== 'function') return false;
+    try {
+      await screen.orientation.lock('portrait');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function installViewportGuards() {
+    normalizeViewportMeta();
+    const refresh = () => {
+      syncInstalledViewportMetrics();
+      requestAnimationFrame(syncInstalledViewportMetrics);
+      setTimeout(syncInstalledViewportMetrics, 80);
+      setTimeout(syncInstalledViewportMetrics, 320);
+    };
+    refresh();
+    window.addEventListener('resize', refresh, { passive: true });
+    window.addEventListener('pageshow', refresh, { passive: true });
+    window.addEventListener('orientationchange', () => { refresh(); keepPortraitOrientation(); }, { passive: true });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { refresh(); keepPortraitOrientation(); } }, { passive: true });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', refresh, { passive: true });
+    }
+    keepPortraitOrientation();
+  }
+
   function addCoreAssets() {
     document.documentElement.classList.add('ct-app-page', 'ct-shell-ready');
+    installViewportGuards();
     if (!document.querySelector('link[href="cashtop-core.css"]')) {
       const link = document.createElement('link');
       link.rel = 'stylesheet';
@@ -2211,7 +2261,7 @@
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
       (async () => {
         try {
-          const registration = await navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'all' });
+          const registration = await navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
           const worker = registration.active || registration.waiting || registration.installing;
           worker?.postMessage({ type: 'VERIFY_CACHE' });
         } catch (err) {

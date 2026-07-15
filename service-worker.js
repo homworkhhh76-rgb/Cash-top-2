@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_VERSION = 'v28-revision-18';
+const CACHE_VERSION = 'v30-revision-20';
 const APP_CACHE = `cash-top-2-app-${CACHE_VERSION}`;
 const REMOTE_STATIC_CACHE = `cash-top-2-remote-static-${CACHE_VERSION}`;
 

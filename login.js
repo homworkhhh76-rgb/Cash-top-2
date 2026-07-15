@@ -1,6 +1,15 @@
 (function () {
   'use strict';
 
+  const keepPortraitOrientation = () => {
+    const standalone = Boolean(window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true);
+    if (!standalone || !screen.orientation || typeof screen.orientation.lock !== 'function') return;
+    screen.orientation.lock('portrait').catch(() => {});
+  };
+  keepPortraitOrientation();
+  window.addEventListener('pageshow', keepPortraitOrientation, { passive: true });
+  window.addEventListener('orientationchange', keepPortraitOrientation, { passive: true });
+
   const rawGet = key => Storage.prototype.getItem.call(localStorage, key);
   const rawSet = (key, value) => Storage.prototype.setItem.call(localStorage, key, String(value));
   const rawRemove = key => Storage.prototype.removeItem.call(localStorage, key);
@@ -458,6 +467,6 @@
     displayReason();
   });
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'all' }).catch(console.warn));
+    window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' }).catch(console.warn));
   }
 })();

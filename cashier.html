@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
+    <meta name="screen-orientation" content="portrait">
+    <meta name="x5-orientation" content="portrait">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
     <title>شاشة الكاشير الذكية - كاش توب 2</title>
     <!-- استيراد خط القاهرة للواجهات -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -230,13 +232,13 @@
 
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
-    <link rel="stylesheet" href="cashtop-core.css?v=18">
+    <link rel="stylesheet" href="cashtop-core.css?v=20">
     <script src="https://unpkg.com/html5-qrcode"></script>
     <script src="barcode-tools.js?v=18"></script>
-    <script src="cashtop-core.js?v=18"></script>
-    <script src="firebase-config.js?v=18"></script>
+    <script src="cashtop-core.js?v=20"></script>
+    <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=18"></script>
+    <script type="module" src="firebase-sync.js?v=19"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -1614,7 +1616,7 @@
             const popup = window.open('', '_blank', 'width=520,height=760');
             if (!popup) { showToast('تعذر فتح نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع.', 'error'); return false; }
             popup.document.open();
-            popup.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>فاتورة ${escapeReceipt(invoice.id)}</title><style>@page{size:${pageSize};margin:0}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:${width}!important;max-width:${width}!important;background:#fff!important}body{font-family:Arial,Tahoma,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}.copy{display:block;width:${width};max-width:${width};margin:0;padding:0}.receipt{display:block;width:100%;max-width:100%;padding:2mm 2mm 3mm;overflow:hidden}.receipt header{text-align:center;border-bottom:1px dashed #000;padding-bottom:2mm;margin-bottom:2mm}.logo{display:block;width:${type==='thermal-58'?'16mm':'20mm'};height:${type==='thermal-58'?'16mm':'20mm'};object-fit:contain;margin:0 auto 1mm}.receipt h2{font-size:${type==='thermal-58'?'14px':'18px'};line-height:1.25;margin:1mm 0}.receipt header div,.meta,.notes,footer{font-size:${type==='thermal-58'?'8px':'9px'};overflow-wrap:anywhere}.meta>div{padding:1mm 0;border-bottom:1px dotted #777}.meta-pair{display:flex;justify-content:space-between;gap:2mm;align-items:flex-start}.meta-pair span{min-width:0;overflow-wrap:anywhere}table{table-layout:fixed;width:100%;border-collapse:collapse;font-size:${type==='thermal-58'?'7.5px':'9px'};margin-top:2mm}th,td{padding:1.1mm .35mm;border-bottom:1px solid #999;text-align:center;vertical-align:top;overflow-wrap:anywhere}th:first-child,td:first-child{text-align:right;width:42%}.totals{margin-top:2mm}.totals div{display:flex;justify-content:space-between;gap:2mm;font-size:${type==='thermal-58'?'9px':'10px'};padding:.7mm 0}.totals .final{font-size:${type==='thermal-58'?'11px':'13px'};font-weight:700;border-top:1px dashed #000;border-bottom:1px dashed #000;padding:1.5mm 0}.notes{margin-top:2mm}footer{text-align:center;border-top:1px dashed #777;margin-top:2mm;padding-top:2mm}.break{height:0;page-break-after:always;break-after:page}@media screen{body{margin:0 auto!important;box-shadow:0 0 12px rgba(0,0,0,.12)}}@media print{html,body,.copy{width:${width}!important;max-width:${width}!important}.receipt{page-break-inside:avoid}}</style></head><body>${copiesMarkup}<script>window.addEventListener('load',async()=>{try{await document.fonts?.ready;await Promise.all([...document.images].map(img=>img.decode?img.decode().catch(()=>{}):Promise.resolve()));}catch(e){}setTimeout(()=>window.print(),120);});<\/script></body></html>`);
+            popup.document.write(`<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"><title>فاتورة ${escapeReceipt(invoice.id)}</title><style>@page{size:${pageSize};margin:0}*{box-sizing:border-box}html,body{margin:0!important;padding:0!important;width:${width}!important;max-width:${width}!important;background:#fff!important}body{font-family:Arial,Tahoma,sans-serif;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}.copy{display:block;width:${width};max-width:${width};margin:0;padding:0}.receipt{display:block;width:100%;max-width:100%;padding:2mm 2mm 3mm;overflow:hidden}.receipt header{text-align:center;border-bottom:1px dashed #000;padding-bottom:2mm;margin-bottom:2mm}.logo{display:block;width:${type==='thermal-58'?'16mm':'20mm'};height:${type==='thermal-58'?'16mm':'20mm'};object-fit:contain;margin:0 auto 1mm}.receipt h2{font-size:${type==='thermal-58'?'14px':'18px'};line-height:1.25;margin:1mm 0}.receipt header div,.meta,.notes,footer{font-size:${type==='thermal-58'?'8px':'9px'};overflow-wrap:anywhere}.meta>div{padding:1mm 0;border-bottom:1px dotted #777}.meta-pair{display:flex;justify-content:space-between;gap:2mm;align-items:flex-start}.meta-pair span{min-width:0;overflow-wrap:anywhere}table{table-layout:fixed;width:100%;border-collapse:collapse;font-size:${type==='thermal-58'?'7.5px':'9px'};margin-top:2mm}th,td{padding:1.1mm .35mm;border-bottom:1px solid #999;text-align:center;vertical-align:top;overflow-wrap:anywhere}th:first-child,td:first-child{text-align:right;width:42%}.totals{margin-top:2mm}.totals div{display:flex;justify-content:space-between;gap:2mm;font-size:${type==='thermal-58'?'9px':'10px'};padding:.7mm 0}.totals .final{font-size:${type==='thermal-58'?'11px':'13px'};font-weight:700;border-top:1px dashed #000;border-bottom:1px dashed #000;padding:1.5mm 0}.notes{margin-top:2mm}footer{text-align:center;border-top:1px dashed #777;margin-top:2mm;padding-top:2mm}.break{height:0;page-break-after:always;break-after:page}@media screen{body{margin:0 auto!important;box-shadow:0 0 12px rgba(0,0,0,.12)}}@media print{html,body,.copy{width:${width}!important;max-width:${width}!important}.receipt{page-break-inside:avoid}}</style></head><body>${copiesMarkup}<script>window.addEventListener('load',async()=>{try{await document.fonts?.ready;await Promise.all([...document.images].map(img=>img.decode?img.decode().catch(()=>{}):Promise.resolve()));}catch(e){}setTimeout(()=>window.print(),120);});<\/script></body></html>`);
             popup.document.close();
             return true;
         }
