@@ -20,17 +20,25 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
     return String(value || '').trim().replace(/[.#$\[\]\/]/g, '_');
   }
 
-  // الإصدارات القديمة كانت تستخدم companyId أولاً. إبقاء هذا الترتيب ضروري
-  // حتى لا ينشأ مسار فارغ عندما يكون companyKey مختلفاً عن companyId.
-  const companyIds = [...new Set([
-    sanitizeSegment(session.companyId),
+  /*
+   * كل شركة تملك مساراً وحيداً وثابتاً مبنياً على companyId. في الإصدارات
+   * السابقة كان الفحص يجرب companyId وcompanyKey وlicenseId ثم يختار المسار
+   * الأحدث؛ وهذا قد يربط مفتاحاً جديداً بمسار غير مقصود أو يقسم بيانات الشركة
+   * بين أكثر من عقدة. نحتفظ بالأسماء القديمة للترحيل فقط، ولا نختارها إلا إذا
+   * كانت بياناتها نفسها تثبت أنها تخص المفتاح الحالي.
+   */
+  const canonicalCompanyId = sanitizeSegment(
+    session.companyId || session.licenseId || session.companyKey || 'unassigned'
+  ) || 'unassigned';
+  const normalizedCompanyKey = String(session.companyKey || '').trim().toUpperCase();
+  const legacyCompanyIds = [...new Set([
     sanitizeSegment(session.companyKey),
     sanitizeSegment(session.licenseId)
-  ].filter(Boolean))];
-  if (!companyIds.length) companyIds.push('unassigned');
+  ].filter(value => value && value !== canonicalCompanyId))];
+  const companyIds = [canonicalCompanyId];
 
-  const stateKey = `${STATE_KEY_PREFIX}::${encodeURIComponent(companyIds[0])}`;
-  const locationKey = `${LOCATION_KEY_PREFIX}::${encodeURIComponent(companyIds.join('|'))}`;
+  const stateKey = `${STATE_KEY_PREFIX}::${encodeURIComponent(canonicalCompanyId)}`;
+  const locationKey = `${LOCATION_KEY_PREFIX}::${encodeURIComponent(canonicalCompanyId)}`;
   let syncing = false;
   let scheduledSync = null;
   let pollTimer = null;
@@ -188,11 +196,23 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
     throw new Error('قاعدة Firebase تطلب تسجيل دخول، لكن خدمة Authentication غير مهيأة. انشر قواعد التوافق المرفقة أو فعّل Anonymous Authentication.');
   }
 
-  function candidateLocations() {
-    const roots = [...new Set([primaryRoot, ...legacyRoots.map(root => String(root || '').replace(/^\/+|\/+$/g, ''))].filter(Boolean))];
+  function exactLocation() {
+    return { root: primaryRoot, companyId: canonicalCompanyId };
+  }
+
+  function legacyCandidateLocations() {
+    const roots = [...new Set([
+      primaryRoot,
+      ...legacyRoots.map(root => String(root || '').replace(/^\/+|\/+$/g, ''))
+    ].filter(Boolean))];
     const locations = [];
-    roots.forEach(root => companyIds.forEach(companyId => locations.push({ root, companyId })));
-    return locations;
+    roots.forEach(root => {
+      if (root !== primaryRoot) locations.push({ root, companyId: canonicalCompanyId });
+      legacyCompanyIds.forEach(companyId => locations.push({ root, companyId }));
+    });
+    return locations.filter((location, index, all) =>
+      all.findIndex(item => item.root === location.root && item.companyId === location.companyId) === index
+    );
   }
 
   function locationPath(location) {
@@ -209,7 +229,9 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
       method: 'GET',
       headers: {
         'Accept': 'application/json',
-        'X-Firebase-ETag': 'true'
+        'X-Firebase-ETag': 'true',
+        'Cache-Control': 'no-cache, no-store, max-age=0',
+        'Pragma': 'no-cache'
       }
     });
     if (!response.ok) throw await firebaseError(response);
@@ -224,7 +246,8 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json;charset=UTF-8',
-        'If-Match': etag
+        'If-Match': etag,
+        'Cache-Control': 'no-cache, no-store, max-age=0'
       },
       body: JSON.stringify(data)
     });
@@ -241,6 +264,31 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
     return { count, updatedAt, hasData: count > 0 || Boolean(data?.meta) };
   }
 
+  function remoteIdentity(data) {
+    const meta = data?.meta && typeof data.meta === 'object' ? data.meta : {};
+    const rawAccess = data?.datasets?.cashtop_company_access;
+    let access = {};
+    try {
+      const payload = normalizeRemotePayload(rawAccess);
+      const decoded = payload?.valueEncoding === VALUE_ENCODING && typeof payload.value === 'string'
+        ? JSON.parse(payload.value)
+        : payload?.value;
+      if (decoded && typeof decoded === 'object') access = decoded;
+    } catch (_) {}
+    return {
+      companyId: sanitizeSegment(access.companyId || meta.companyId || ''),
+      companyKey: String(access.companyKey || meta.companyKey || '').trim().toUpperCase()
+    };
+  }
+
+  function locationBelongsToCurrentCompany(location, data) {
+    if (location.root === primaryRoot && location.companyId === canonicalCompanyId) return true;
+    const identity = remoteIdentity(data);
+    if (identity.companyId && identity.companyId === canonicalCompanyId) return true;
+    if (normalizedCompanyKey && identity.companyKey === normalizedCompanyKey) return true;
+    return false;
+  }
+
   function loadCachedLocation() {
     try {
       const cached = JSON.parse(rawStorage.get(locationKey) || 'null');
@@ -252,55 +300,81 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
   function saveSelectedLocation(location) {
     selectedLocation = location;
     rawStorage.set(locationKey, JSON.stringify({ ...location, selectedAt: Date.now() }));
-    writeState({ remotePath: locationPath(location) });
+    writeState({ remotePath: locationPath(location), canonicalCompanyId });
   }
 
   async function resolveLocation(token, forceProbe = false) {
-    if (selectedLocation && !forceProbe) return { location: selectedLocation, read: await readLocation(selectedLocation, token) };
+    const isExact = location => location?.root === primaryRoot && location?.companyId === canonicalCompanyId;
+    if (selectedLocation && !forceProbe && isExact(selectedLocation)) {
+      const read = await readLocation(selectedLocation, token);
+      if (locationBelongsToCurrentCompany(selectedLocation, read.data)) {
+        return { location: selectedLocation, read };
+      }
+      selectedLocation = null;
+    }
 
     let permissionError = null;
     const cached = loadCachedLocation();
-    if (cached && !forceProbe) {
+    if (cached && !forceProbe && isExact(cached)) {
       try {
         const read = await readLocation(cached, token);
-        if (remoteStats(read.data).hasData) {
+        if (locationBelongsToCurrentCompany(cached, read.data)) {
           saveSelectedLocation(cached);
           return { location: cached, read };
         }
+        rawStorage.remove(locationKey);
       } catch (error) {
         if (isPermissionError(error)) permissionError = error;
         else console.warn('[CASH TOP 2] Firebase cached path:', locationPath(cached), error);
       }
     }
 
-    let best = null;
-    let firstEmpty = null;
-    for (const location of candidateLocations()) {
+    /* المسار الرسمي للشركة هو الخيار الأول دائماً حتى لو كان هناك مسار تاريخي محفوظ. */
+    const exact = exactLocation();
+    let exactRead = null;
+    try {
+      exactRead = await readLocation(exact, token);
+      if (remoteStats(exactRead.data).hasData) {
+        saveSelectedLocation(exact);
+        return { location: exact, read: exactRead };
+      }
+    } catch (error) {
+      if (isPermissionError(error)) permissionError = error;
+      else throw error;
+    }
+
+    /*
+     * ترحيل اختياري من المسارات التاريخية: لا نستخدم أي عقدة إلا عندما يثبت
+     * companyId أو companyKey داخلها أنها تخص الجلسة الحالية.
+     */
+    let legacyMatch = null;
+    const legacyLocations = legacyCandidateLocations();
+    if (cached && !isExact(cached)) legacyLocations.unshift(cached);
+    if (selectedLocation && !isExact(selectedLocation)) legacyLocations.unshift(selectedLocation);
+    for (const location of legacyLocations.filter((item, index, all) =>
+      all.findIndex(other => other.root === item.root && other.companyId === item.companyId) === index
+    )) {
       try {
         const read = await readLocation(location, token);
         const stats = remoteStats(read.data);
-        if (!firstEmpty) firstEmpty = { location, read, stats };
-        if (!stats.hasData) continue;
-        if (!best || stats.updatedAt > best.stats.updatedAt ||
-          (stats.updatedAt === best.stats.updatedAt && stats.count > best.stats.count)) {
-          best = { location, read, stats };
+        if (!stats.hasData || !locationBelongsToCurrentCompany(location, read.data)) continue;
+        if (!legacyMatch || stats.updatedAt > legacyMatch.stats.updatedAt) {
+          legacyMatch = { location, read, stats };
         }
       } catch (error) {
-        if (isPermissionError(error)) {
-          permissionError ||= error;
-          continue;
-        }
-        console.warn('[CASH TOP 2] Firebase path probe:', locationPath(location), error);
+        if (isPermissionError(error)) permissionError ||= error;
+        else console.warn('[CASH TOP 2] Firebase legacy path probe:', locationPath(location), error);
       }
     }
 
-    if (!best && !firstEmpty && permissionError) throw permissionError;
-    const resolved = best || firstEmpty || {
-      location: { root: primaryRoot, companyId: companyIds[0] },
-      read: { data: {}, etag: '*' }
-    };
-    saveSelectedLocation(resolved.location);
-    return { location: resolved.location, read: resolved.read };
+    if (legacyMatch) {
+      saveSelectedLocation(legacyMatch.location);
+      return { location: legacyMatch.location, read: legacyMatch.read };
+    }
+    if (!exactRead && permissionError) throw permissionError;
+
+    saveSelectedLocation(exact);
+    return { location: exact, read: exactRead || { data: {}, etag: '*' } };
   }
 
   // نجرب Realtime Database مباشرة أولاً. بذلك لا يتم استدعاء خدمة
@@ -381,6 +455,47 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
     };
   }
 
+  function decodeDatasetObject(payload) {
+    try {
+      const normalized = normalizeRemotePayload(payload);
+      if (normalized.deleted) return {};
+      let value = normalized.value;
+      if (normalized.valueEncoding === VALUE_ENCODING && typeof value === 'string') value = JSON.parse(value);
+      else if (typeof value === 'string') value = JSON.parse(value);
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function mergeAdminControlledAccess(remotePayload) {
+    const key = 'cashtop_company_access';
+    const remoteAccess = decodeDatasetObject(remotePayload);
+    if (!Object.keys(remoteAccess).length) return false;
+    const localRaw = core.getRawCompanyDataset ? core.getRawCompanyDataset(key) : localStorage.getItem(key);
+    let localAccess = {};
+    try { localAccess = JSON.parse(localRaw || '{}') || {}; } catch (_) { localAccess = {}; }
+    const protectedFields = [
+      'companyId', 'companyKey', 'companyName', 'status', 'plan', 'startAt', 'endAt',
+      'durationUnit', 'durationQuantity', 'backupImportEnabled', 'authVersion', 'deleted'
+    ];
+    const merged = { ...localAccess };
+    protectedFields.forEach(field => {
+      if (Object.prototype.hasOwnProperty.call(remoteAccess, field)) merged[field] = remoteAccess[field];
+    });
+    /* حالة المدير من لوحة الإدارة تبقى مرجعية، بينما نحتفظ بكلمة مرور أحدث غُيرت من إعدادات الشركة. */
+    if (remoteAccess.manager && typeof remoteAccess.manager === 'object') {
+      merged.manager = { ...(remoteAccess.manager || {}), ...(localAccess.manager || {}) };
+      ['id', 'username', 'displayName', 'role', 'active', 'authVersion'].forEach(field => {
+        if (Object.prototype.hasOwnProperty.call(remoteAccess.manager, field)) merged.manager[field] = remoteAccess.manager[field];
+      });
+    }
+    const mergedRaw = JSON.stringify(merged);
+    if (mergedRaw === String(localRaw || '')) return false;
+    core.rawSet(core.namespaceKey(key), mergedRaw);
+    return true;
+  }
+
   function pendingForKey(key) {
     return core.getSyncQueue().find(item => item.key === key) || null;
   }
@@ -446,7 +561,7 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
       companyKey: session.companyKey || '',
       companyName: session.companyName || '',
       appName: 'كاش توب 2',
-      schema: 14,
+      schema: 18,
       datasetCount: core.DATA_KEYS.length,
       deviceId: core.rawGet('cashtop_device_id') || '',
       updatedAt: Date.now(),
@@ -490,10 +605,18 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
           const pending = queue.some(item => item.key === key);
           const seeded = localMeta.seeded === true || localTime <= 0;
 
+          /* فتح/قفل استيراد النسخ وخطة الشركة لا يوقفان المزامنة ولا تضيع قيمهما عند وجود تعديل محلي معلّق. */
+          if (key === 'cashtop_company_access' && remote && pending) {
+            mergeAdminControlledAccess(remoteDatasets[key]);
+          }
+
           if (remote && (seeded || (!pending && remoteTime > localTime))) {
             pulls.push({ key, payload: remote });
             continue;
           }
+
+          /* لا نرفع عشرات المجموعات الفارغة المزروعة تلقائياً عند إنشاء مفتاح جديد. */
+          if (!remote && seeded && !pending) continue;
 
           if (!remote || pending || localTime > remoteTime) {
             const payload = makeLocalPayload(key, remote?.revision || 0);

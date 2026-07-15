@@ -1,3 +1,15 @@
+إعداد مزامنة Firebase — كاش توب 2 / Revision 18
+
+المسار الرسمي الوحيد لكل شركة:
+- cashTopExchange/cashTopPOS/{companyId}
+
+إصلاحات Revision 18:
+1. طلبات Firebase لا تمر عبر Cache Storage ولا يمكن أن تعيد نسخة قديمة.
+2. companyId هو هوية المسار الثابتة؛ companyKey وlicenseId يستخدمان فقط للتحقق من مسار تاريخي مطابق.
+3. فتح/قفل استيراد النسخ الاحتياطية لا يفعّل المزامنة ولا يوقفها؛ المزامنة تعمل دائماً عندما يكون Firebase مفعلاً.
+4. لوحة المشرف تحدّث بيانات الاشتراك وحدها ولا تستبدل datasets الخاصة بالشركة.
+5. يجب نشر قواعد Realtime Database المناسبة أو تفعيل Anonymous Authentication عند استخدام القواعد الآمنة.
+
 إعداد مزامنة Firebase — كاش توب 2 / Revision 8
 
 مشروع Realtime Database المستخدم:

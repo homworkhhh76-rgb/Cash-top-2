@@ -458,6 +458,6 @@
     displayReason();
   });
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' }).catch(console.warn));
+    window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'all' }).catch(console.warn));
   }
 })();

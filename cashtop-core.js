@@ -2191,14 +2191,29 @@
     }
 
     if (navigator.storage && typeof navigator.storage.persist === 'function') {
-      navigator.storage.persist().catch(() => false);
+      const requestPersistentStorage = async () => {
+        try {
+          const already = typeof navigator.storage.persisted === 'function'
+            ? await navigator.storage.persisted()
+            : false;
+          const granted = already || await navigator.storage.persist();
+          rawSet('ct_storage_persistence_v1', JSON.stringify({ granted: Boolean(granted), checkedAt: Date.now() }));
+          return granted;
+        } catch (_) {
+          rawSet('ct_storage_persistence_v1', JSON.stringify({ granted: false, checkedAt: Date.now() }));
+          return false;
+        }
+      };
+      requestPersistentStorage();
+      /* بعض المتصفحات لا تمنح التخزين الدائم إلا بعد تفاعل واضح من المستخدم. */
+      document.addEventListener('pointerdown', requestPersistentStorage, { once: true, passive: true });
     }
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
       (async () => {
         try {
-          const registration = await navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
+          const registration = await navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'all' });
           const worker = registration.active || registration.waiting || registration.installing;
-          worker?.postMessage({ type: 'WARM_CACHE' });
+          worker?.postMessage({ type: 'VERIFY_CACHE' });
         } catch (err) {
           console.warn('[CASH TOP 2] SW:', err);
         }
