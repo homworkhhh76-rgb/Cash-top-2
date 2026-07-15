@@ -16,6 +16,9 @@
     
     <!-- استيراد مكتبة Font Awesome للأيقونات الاحترافية -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
@@ -82,10 +85,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -200,13 +203,13 @@
             <button class="btn-add-unit" onclick="openModal()"><i class="fa-solid fa-plus"></i> إضافة وحدة جديدة</button>
         </div>
 
-        <div class="table-container">
+        <div class="table-container" id="unitsExportArea">
             <div class="table-header-wrapper">
                 <div class="table-title">سجل قياس وجرد وحدات العبوات بالأصناف</div>
                 <div class="export-group">
-                    <button class="btn-export excel"><i class="fa-solid fa-file-excel"></i> اكسل</button>
-                    <button class="btn-export pdf"><i class="fa-solid fa-file-pdf"></i> PDF</button>
-                    <button class="btn-export image"><i class="fa-solid fa-image"></i> صورة</button>
+                    <button class="btn-export excel" onclick="exportUnitsExcel()"><i class="fa-solid fa-file-excel"></i> اكسل</button>
+                    <button class="btn-export pdf" onclick="exportUnitsPDF()"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+                    <button class="btn-export image" onclick="exportUnitsImage()"><i class="fa-solid fa-image"></i> صورة</button>
                     <button class="btn-export" onclick="window.print()"><i class="fa-solid fa-print"></i> طباعة</button>
                 </div>
             </div>
@@ -322,6 +325,67 @@
             renderTable(filtered);
         }
 
+        function exportUnitsExcel() {
+            const wsData = [
+                ['كاش توب 2 - سجل وحدات الأصناف'],
+                ['تاريخ التقرير', new Date().toLocaleString('en-GB')],
+                [],
+                ['#', 'اسم الوحدة', 'رمز الوحدة', 'اسم القطعة', 'رمز القطعة', 'عدد القطع في الوحدة']
+            ];
+            unitsData.forEach((unit, index) => wsData.push([
+                index + 1,
+                unit.unitName || '-',
+                unit.unitCode || '-',
+                unit.pieceName || '-',
+                unit.pieceCode || '-',
+                Number(unit.piecesCount || 0)
+            ]));
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+            ws['!cols'] = [{wch:6},{wch:24},{wch:18},{wch:24},{wch:18},{wch:22}];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'الوحدات');
+            XLSX.writeFile(wb, `سجل_الوحدات_${Date.now()}.xlsx`);
+        }
+
+        async function exportUnitsPDF() {
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: 'سجل قياس وجرد وحدات العبوات بالأصناف',
+                    subtitle: `عدد الوحدات: ${unitsData.length} — تاريخ التقرير: ${new Date().toLocaleString('en-GB')}`,
+                    columns: ['#', 'اسم الوحدة', 'رمز الوحدة', 'اسم القطعة', 'رمز القطعة', 'عدد القطع في الوحدة'],
+                    rows: unitsData.map((unit, index) => [
+                        index + 1,
+                        unit.unitName || '-',
+                        unit.unitCode || '-',
+                        unit.pieceName || '-',
+                        unit.pieceCode || '-',
+                        Number(unit.piecesCount || 0)
+                    ]),
+                    filename: `سجل_الوحدات_${Date.now()}.pdf`,
+                    orientation: 'landscape'
+                });
+            } catch (error) {
+                console.error(error);
+                alert('تعذر إنشاء ملف PDF للوحدات.');
+            }
+        }
+
+        async function exportUnitsImage() {
+            const area = document.getElementById('unitsExportArea');
+            const actions = Array.from(area.querySelectorAll('.actions-wrapper, .export-group'));
+            const previous = actions.map(node => node.style.display);
+            actions.forEach(node => { node.style.display = 'none'; });
+            try {
+                const canvas = await html2canvas(area, { scale: 2, backgroundColor: '#ffffff' });
+                const link = document.createElement('a');
+                link.download = `سجل_الوحدات_${Date.now()}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } finally {
+                actions.forEach((node, index) => { node.style.display = previous[index]; });
+            }
+        }
+
         function openModal() {
             document.getElementById('unitForm').reset();
             document.getElementById('editingId').value = '';
@@ -396,6 +460,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"units.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

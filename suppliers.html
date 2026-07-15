@@ -193,10 +193,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -1104,27 +1104,25 @@
             showToast('تم تصدير الإكسل.', 'success');
         }
 
-        function exportAllSuppliersPDF() {
-            if(suppliersDB.filter(s=>s.active!==false).length === 0) { showToast('لا توجد بيانات.', 'warning'); return; }
-            prepareGlobalExport();
-            
-            const area = document.getElementById("exportAllTemplate");
-            area.classList.add('print-active');
-            showToast("جاري تجهيز الكشف الشامل... PDF", "success");
-
-            html2canvas(area, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`كشف_الموردين_الشامل_${Date.now()}.pdf`);
-                
-                area.classList.remove('print-active');
-                showToast("تم تنزيل الكشف بنجاح.", "success");
+        async function exportAllSuppliersPDF() {
+            const activeSuppliers = suppliersDB.filter(s => s.active !== false);
+            if(activeSuppliers.length === 0) { showToast('لا توجد بيانات.', 'warning'); return; }
+            const rows = activeSuppliers.map((sup, i) => {
+                const bal = getSupplierBalance(sup);
+                const status = bal > 0 ? 'له (دين علينا)' : (bal < 0 ? 'عليه (دين لنا)' : 'مصفر');
+                return [i + 1, sup.name || '-', sup.phone || '-', Math.abs(bal).toFixed(2), status, bal.toFixed(2)];
             });
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: 'كشف أرصدة الموردين',
+                    subtitle: `عدد الموردين: ${activeSuppliers.length} — تاريخ الإصدار: ${new Date().toLocaleString('en-GB')}`,
+                    columns: ['#', 'اسم المورد', 'رقم الجوال', 'قيمة الرصيد', 'حالة الرصيد', 'الرصيد الصافي'],
+                    rows,
+                    filename: `كشف_الموردين_الشامل_${Date.now()}.pdf`,
+                    orientation: 'landscape'
+                });
+                showToast("تم تنزيل الكشف بنجاح.", "success");
+            } catch (err) { console.error(err); showToast('تعذر إنشاء PDF الموردين.', 'error'); }
         }
 
         /* ========================================================== */
@@ -1172,29 +1170,30 @@
             return true;
         }
 
-        function exportIndividualPDF() {
+        async function exportIndividualPDF() {
             if(!currentSupIdForHistory) return;
-            if(!prepareIndividualExport(currentSupIdForHistory)) return;
-
-            const area = document.getElementById("exportIndividualTemplate");
-            area.classList.add('print-active');
-            showToast("جاري إعداد كشف المورد...", "success");
-
-            html2canvas(area, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                
-                let supName = suppliersDB.find(s=>s.id === currentSupIdForHistory).name;
-                pdf.save(`كشف_حساب_${supName}_${Date.now()}.pdf`);
-                
-                area.classList.remove('print-active');
+            const sup = suppliersDB.find(s => s.id === currentSupIdForHistory);
+            if (!sup) return;
+            const bal = getSupplierBalance(sup);
+            const sortedMovs = [...(sup.movements || [])].sort((a,b) => new Date(a.date) - new Date(b.date));
+            const rows = sortedMovs.map((m, i) => [
+                i + 1,
+                m.date || '-',
+                m.type === 'payment' ? 'سداد (صرف)' : 'دين / فاتورة',
+                parseFloat(m.amount || 0).toFixed(2),
+                supplierMovementDescription(m) || m.note || '-'
+            ]);
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: `كشف حساب المورد: ${sup.name || '-'}`,
+                    subtitle: `الجوال: ${sup.phone || '-'} — الرصيد الختامي: ${Math.abs(bal).toFixed(2)} ₪ — الحالة: ${bal > 0 ? 'له' : (bal < 0 ? 'عليه' : 'مصفر')}`,
+                    columns: ['#', 'التاريخ', 'نوع الحركة', 'المبلغ (₪)', 'البيان / الملاحظات'],
+                    rows: rows.length ? rows : [[1, '-', '-', '0.00', 'لا توجد حركات مسجلة']],
+                    filename: `كشف_حساب_${sup.name || 'مورد'}_${Date.now()}.pdf`,
+                    orientation: 'landscape'
+                });
                 showToast("تم تنزيل كشف الحساب.", "success");
-            });
+            } catch (err) { console.error(err); showToast('تعذر إنشاء كشف المورد PDF.', 'error'); }
         }
 
         function exportIndividualExcel() {
@@ -1242,6 +1241,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"suppliers.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

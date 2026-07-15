@@ -35,7 +35,8 @@
     'cashtop_admin_users',
     'cashtop_superadmin_session',
     'cashtop_last_firebase_user',
-    'cashtop_firebase_enabled'
+    'cashtop_firebase_enabled',
+    'cashtop_tenant_bindings'
   ]);
 
   const ALIASES = {
@@ -97,7 +98,7 @@
     { id: 'inventory', title: 'صلاحيات المنتجات والمخزون', permissions: [
       ['products.create', 'إضافة منتج'], ['products.edit', 'تعديل المنتجات'], ['products.delete', 'حذف المنتجات'],
       ['products.export', 'تصدير المنتجات'], ['inventory.adjust', 'تعديل كميات المخزون'],
-      ['inventory.transfer', 'نقل المخزون بين المخازن والفروع'],
+      ['inventory.transfer', 'نقل بين الفروع والمخازن (الموظف ينقل من فرعه فقط)'],
       ['inventory.importExport', 'استيراد وتصدير بيانات المخزون'],
       ['warehouses.manage', 'إضافة وتعديل وحذف المخازن'], ['branches.manage', 'إضافة وتعديل وحذف الفروع'],
       ['units.manage', 'إضافة وتعديل وحذف الوحدات'], ['shortages.supply', 'توريد ومعالجة نواقص المخزون'],
@@ -138,7 +139,7 @@
   const PAGE_PERMISSIONS = {
     'لوحة التحكم.html': 'dashboard.view', 'cashier.html': 'pos.access', 'invoices.html': 'sales.invoices.view',
     'المشتريات.html': 'purchases.view', 'مرجع المشتريات.html': 'purchaseReturns.view', 'products.html': 'products.view',
-    'warehouses.html': 'warehouses.view', 'branches.html': 'branches.view', 'units.html': 'units.view',
+    'warehouses.html': 'warehouses.view', 'branches.html': ['branches.view', 'inventory.transfer'], 'units.html': 'units.view',
     'shortages.html': 'shortages.view', 'barcode-generator.html': 'barcode.view', 'customers.html': 'customers.view',
     'customer-groups.html': 'customerGroups.view', 'suppliers.html': 'suppliers.view', 'المناديب.html': 'agents.view',
     'accounts.html': 'accounts.view', 'journal.html': 'journal.view', 'sands.html': 'vouchers.view',
@@ -368,15 +369,44 @@
     return Array.isArray(fallback) ? [...fallback] : [];
   }
   function canonicalKey(key) { return ALIASES[key] || key; }
-  function getSession() { return safeJson(rawGet('cashtop_session'), null); }
-  function companyIdFromSession() {
-    const session = getSession();
-    return session && (session.companyId || session.companyKey) ? String(session.companyId || session.companyKey) : 'unassigned';
+  const TAB_SESSION_KEY = 'cashtop_tab_session_v2';
+  function sessionTenantId(session) {
+    return session && (session.tenantId || session.companyId || session.companyKey)
+      ? String(session.tenantId || session.companyId || session.companyKey)
+      : '';
   }
-  function namespaceKey(key, companyId = companyIdFromSession()) {
+  function getSession() {
+    try {
+      const tabSession = safeJson(sessionStorage.getItem(TAB_SESSION_KEY), null);
+      if (tabSession) return tabSession;
+    } catch (_) {}
+    const globalSession = safeJson(rawGet('cashtop_session'), null);
+    if (globalSession) {
+      try { sessionStorage.setItem(TAB_SESSION_KEY, JSON.stringify(globalSession)); } catch (_) {}
+    }
+    return globalSession;
+  }
+  function persistSession(session, forceGlobal = false) {
+    if (!session) return;
+    try { sessionStorage.setItem(TAB_SESSION_KEY, JSON.stringify(session)); } catch (_) {}
+    const globalSession = safeJson(rawGet('cashtop_session'), null);
+    if (forceGlobal || !globalSession || sessionTenantId(globalSession) === sessionTenantId(session)) {
+      rawSet('cashtop_session', JSON.stringify(session));
+    }
+  }
+  function tenantIdFromSession() {
+    const session = getSession();
+    return session && (session.tenantId || session.companyId || session.companyKey)
+      ? String(session.tenantId || session.companyId || session.companyKey)
+      : 'unassigned';
+  }
+  // companyIdFromSession بقي للاسم القديم، لكن القيمة الآن هي معرّف المستأجر الثابت.
+  // هذا يمنع أن يتغير مسار التخزين عند تغيير مفتاح الشركة أو إعادة استخدام مفتاح قديم.
+  function companyIdFromSession() { return tenantIdFromSession(); }
+  function namespaceKey(key, companyId = tenantIdFromSession()) {
     return `cashtop_data::${encodeURIComponent(companyId)}::${canonicalKey(key)}`;
   }
-  function metaKey(key, companyId = companyIdFromSession()) {
+  function metaKey(key, companyId = tenantIdFromSession()) {
     return `cashtop_meta::${encodeURIComponent(companyId)}::${canonicalKey(key)}`;
   }
   function isManagedKey(key) {
@@ -481,7 +511,8 @@
     list.push({
       id: crypto.randomUUID ? crypto.randomUUID() : `AUD_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       timestamp: new Date().toISOString(),
-      companyId: session.companyId || session.companyKey || null,
+      tenantId: session.tenantId || session.companyId || session.companyKey || null,
+      companyId: session.tenantId || session.companyId || session.companyKey || null,
       branchId: branchIdFromSession(session),
       userId: session.uid || session.username || null,
       username: session.username || session.displayName || 'غير معروف',
@@ -543,18 +574,41 @@
     if (channel) channel.postMessage({ type: 'data-change', ...detail });
   }
 
+  function canClaimLegacyUnscopedData(tenantId) {
+    const ownerKey = 'ct_legacy_data_owner_tenant_v2';
+    const currentOwner = rawGet(ownerKey);
+    if (currentOwner) return currentOwner === String(tenantId);
+
+    // إذا كانت هناك مساحة بيانات لشركة أخرى فلا ننقل أي مفاتيح قديمة غير معزولة
+    // إلى الشركة الحالية. هذا هو أهم حاجز لمنع ظهور بيانات مفتاح سابق داخل مفتاح جديد.
+    const encodedCurrent = encodeURIComponent(String(tenantId));
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const storageKey = RAW.key.call(localStorage, i);
+      if (!storageKey || !storageKey.startsWith('cashtop_data::')) continue;
+      const remainder = storageKey.slice('cashtop_data::'.length);
+      const encodedTenant = remainder.split('::')[0];
+      if (encodedTenant && encodedTenant !== encodedCurrent) return false;
+    }
+    rawSet(ownerKey, String(tenantId));
+    return true;
+  }
+
   function migrateLegacyValue(key) {
     const canonical = canonicalKey(key);
-    const ns = namespaceKey(canonical);
+    const tenantId = tenantIdFromSession();
+    const ns = namespaceKey(canonical, tenantId);
     let current = rawGet(ns);
     if (current !== null) return current;
 
     const candidates = [canonical, ...Object.keys(ALIASES).filter(k => ALIASES[k] === canonical)];
+    const hasLegacy = candidates.some(candidate => rawGet(candidate) !== null);
+    if (!hasLegacy || !canClaimLegacyUnscopedData(tenantId)) return null;
+
     for (const candidate of candidates) {
       const legacy = rawGet(candidate);
       if (legacy !== null) {
         rawSet(ns, legacy);
-        rawSet(metaKey(canonical), JSON.stringify({ updatedAt: Date.now(), revision: 1, migratedFrom: candidate }));
+        rawSet(metaKey(canonical, tenantId), JSON.stringify({ updatedAt: Date.now(), revision: 1, migratedFrom: candidate, tenantId }));
         candidates.forEach(rawRemove);
         return legacy;
       }
@@ -597,7 +651,7 @@
     if (isCompanyAdminRole(role)) return 'MAIN';
     const recordId = session.branchRecordId || session.branchId;
     if (!recordId) return 'MAIN';
-    const companyId = session.companyId || session.companyKey || companyIdFromSession();
+    const companyId = session.tenantId || session.companyId || session.companyKey || companyIdFromSession();
     const branches = normalizeArrayValue(fullDatasetValue('cashtop_branches', [], companyId), []);
     const branch = branches.find(item => String(item.id) === String(recordId));
     return branch?.isMain === true ? 'MAIN' : String(recordId);
@@ -606,6 +660,38 @@
   function recordBranchId(record) {
     const value = record && (record.dataBranchId || record.branchId);
     return value == null || value === '' ? 'MAIN' : String(value);
+  }
+
+  const branchStoreScopeCache = new Map();
+  function storeIdsForBranch(branchId, companyId = companyIdFromSession()) {
+    const branch = String(branchId || 'MAIN');
+    const rawStores = rawGet(namespaceKey('cashtop_stores', companyId)) || '[]';
+    const cacheKey = `${companyId}::${branch}`;
+    const cached = branchStoreScopeCache.get(cacheKey);
+    if (cached && cached.raw === rawStores) return cached.ids;
+    const stores = normalizeArrayValue(safeJson(rawStores, []), []);
+    const ids = new Set(stores.filter(store => recordBranchId(store) === branch).map(store => String(store.id || '')).filter(Boolean));
+    branchStoreScopeCache.set(cacheKey, { raw: rawStores, ids });
+    return ids;
+  }
+
+  function filterStockMapForStores(stockMap, storeIds) {
+    const source = stockMap && typeof stockMap === 'object' ? stockMap : {};
+    const result = {};
+    storeIds.forEach(id => {
+      if (Object.prototype.hasOwnProperty.call(source, id)) result[id] = Math.max(0, Number(source[id] || 0));
+    });
+    return result;
+  }
+
+  function mergeStockMapForStores(oldMap, incomingMap, storeIds) {
+    const result = deepClone(oldMap && typeof oldMap === 'object' ? oldMap : {}) || {};
+    const source = incomingMap && typeof incomingMap === 'object' ? incomingMap : {};
+    storeIds.forEach(id => {
+      if (Object.prototype.hasOwnProperty.call(source, id)) result[id] = Math.max(0, Number(source[id] || 0));
+      else delete result[id];
+    });
+    return result;
   }
 
   function sameBranch(record, branchId = branchIdFromSession()) {
@@ -624,16 +710,26 @@
     if (catalog[branch] === true || String(product.ownerBranchId || '') === branch) return true;
     if (product.branchStocks && Object.prototype.hasOwnProperty.call(product.branchStocks, branch)) return true;
     if (product.branchInventoryLots && Array.isArray(product.branchInventoryLots[branch])) return true;
-    return Array.isArray(product.variants) && product.variants.some(v => v?.branchStocks && Object.prototype.hasOwnProperty.call(v.branchStocks, branch));
+    const scopedStores = storeIdsForBranch(branch);
+    if ([...scopedStores].some(id => Number(product.storeStocks?.[id] || 0) > 0)) return true;
+    return Array.isArray(product.variants) && product.variants.some(v =>
+      (v?.branchStocks && Object.prototype.hasOwnProperty.call(v.branchStocks, branch)) ||
+      [...scopedStores].some(id => Number(v?.storeStocks?.[id] || 0) > 0)
+    );
   }
 
   function projectProductForBranch(product, branchId) {
     const branch = String(branchId || 'MAIN');
     const clone = deepClone(product) || {};
+    const scopedStores = storeIdsForBranch(branch);
     clone.__ctDataBranchId = branch;
+    clone.storeStocks = filterStockMapForStores(product.storeStocks, scopedStores);
     if (branch === 'MAIN') {
       clone.inventoryLots = normalizeArrayValue(product.inventoryLots || [], []).filter(lot => recordBranchId(lot) === 'MAIN');
-      if (Array.isArray(clone.variants)) clone.variants.forEach((variant, index) => { variant.qty = Number(product.variants?.[index]?.qty || 0); });
+      if (Array.isArray(clone.variants)) clone.variants.forEach((variant, index) => {
+        variant.qty = Number(product.variants?.[index]?.qty || 0);
+        variant.storeStocks = filterStockMapForStores(product.variants?.[index]?.storeStocks, scopedStores);
+      });
       return clone;
     }
     clone.stockPieces = Math.max(0, Number(product.branchStocks?.[branch] || 0));
@@ -642,6 +738,7 @@
       clone.variants.forEach((variant, index) => {
         const original = product.variants?.[index] || variant;
         variant.qty = Math.max(0, Number(original.branchStocks?.[branch] || 0));
+        variant.storeStocks = filterStockMapForStores(original.storeStocks, scopedStores);
       });
     }
     return clone;
@@ -667,20 +764,24 @@
       branchStocks: deepClone(target.branchStocks || {}),
       branchInventoryLots: deepClone(target.branchInventoryLots || {}),
       branchCatalog: deepClone(target.branchCatalog || {}),
+      storeStocks: deepClone(target.storeStocks || {}),
       variants: deepClone(target.variants || [])
     };
-    const skip = new Set(['stockPieces','inventoryLots','branchStocks','branchInventoryLots','branchCatalog','variants','__ctDataBranchId']);
+    const skip = new Set(['stockPieces','inventoryLots','branchStocks','branchInventoryLots','branchCatalog','storeStocks','variants','__ctDataBranchId']);
     Object.entries(source).forEach(([key, value]) => { if (!skip.has(key)) target[key] = deepClone(value); });
     target.id = target.id || source.id || `P_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
     target.branchStocks = preserved.branchStocks || {};
     target.branchInventoryLots = preserved.branchInventoryLots || {};
     target.branchCatalog = preserved.branchCatalog || {};
+    const scopedStores = storeIdsForBranch(branch);
+    target.storeStocks = mergeStockMapForStores(preserved.storeStocks, source.storeStocks, scopedStores);
     const oldVariants = preserved.variants || [];
     const oldById = new Map(oldVariants.map((v,i) => [variantIdentity(v,i), v]));
     target.variants = normalizeArrayValue(source.variants || [], []).map((variant, index) => {
       const old = oldById.get(variantIdentity(variant,index)) || oldVariants[index] || {};
       const merged = { ...deepClone(old), ...deepClone(variant) };
       merged.branchStocks = deepClone(old.branchStocks || variant.branchStocks || {});
+      merged.storeStocks = mergeStockMapForStores(old.storeStocks || {}, variant.storeStocks || {}, scopedStores);
       if (branch === 'MAIN') merged.qty = Math.max(0, Number(variant.qty || 0));
       else {
         merged.qty = Math.max(0, Number(old.qty || 0));
@@ -707,8 +808,13 @@
   function productHasAnyBranch(product) {
     if (Number(product.stockPieces || 0) > 0 || product.branchCatalog?.MAIN === true) return true;
     if (Object.values(product.branchStocks || {}).some(value => Number(value || 0) > 0)) return true;
+    if (Object.values(product.storeStocks || {}).some(value => Number(value || 0) > 0)) return true;
     if (Object.values(product.branchCatalog || {}).some(Boolean)) return true;
-    return Array.isArray(product.variants) && product.variants.some(v => Number(v.qty || 0) > 0 || Object.values(v.branchStocks || {}).some(value => Number(value || 0) > 0));
+    return Array.isArray(product.variants) && product.variants.some(v =>
+      Number(v.qty || 0) > 0 ||
+      Object.values(v.branchStocks || {}).some(value => Number(value || 0) > 0) ||
+      Object.values(v.storeStocks || {}).some(value => Number(value || 0) > 0)
+    );
   }
 
   function mergeProducts(rawOld, incomingValue) {
@@ -721,15 +827,24 @@
     for (const product of full) {
       if (!productVisibleInBranch(product, branch) || incomingIds.has(String(product.id))) continue;
       const target = byId.get(String(product.id));
+      const scopedStores = storeIdsForBranch(branch);
       if (branch === 'MAIN') {
         target.stockPieces = 0; target.inventoryLots = [];
         if (target.branchCatalog) delete target.branchCatalog.MAIN;
-        (target.variants || []).forEach(v => { v.qty = 0; });
+        scopedStores.forEach(id => { if (target.storeStocks) delete target.storeStocks[id]; });
+        (target.variants || []).forEach(v => {
+          v.qty = 0;
+          scopedStores.forEach(id => { if (v.storeStocks) delete v.storeStocks[id]; });
+        });
       } else {
         if (target.branchStocks) delete target.branchStocks[branch];
         if (target.branchInventoryLots) delete target.branchInventoryLots[branch];
         if (target.branchCatalog) delete target.branchCatalog[branch];
-        (target.variants || []).forEach(v => { if (v.branchStocks) delete v.branchStocks[branch]; });
+        scopedStores.forEach(id => { if (target.storeStocks) delete target.storeStocks[id]; });
+        (target.variants || []).forEach(v => {
+          if (v.branchStocks) delete v.branchStocks[branch];
+          scopedStores.forEach(id => { if (v.storeStocks) delete v.storeStocks[id]; });
+        });
       }
       if (!productHasAnyBranch(target)) byId.delete(String(product.id));
     }
@@ -841,6 +956,30 @@
     return rawGet(namespaceKey(canonicalKey(key)));
   }
 
+  // كتابة مجموعة الشركة الكاملة دون إسقاطها على فرع الجلسة الحالية.
+  // تستخدمها العمليات العابرة للفروع (مثل النقل من مخزن في فرع إلى مخزن في فرع آخر).
+  function setRawCompanyDataset(key, value, options = {}) {
+    const canonical = canonicalKey(key);
+    if (!isManagedKey(canonical)) throw new Error('مجموعة البيانات غير مدارة');
+    const ns = namespaceKey(canonical);
+    const oldValue = rawGet(ns);
+    const stringValue = typeof value === 'string' ? value : JSON.stringify(value);
+    if (oldValue === stringValue) return { changed: false, operationId: null };
+    rawSet(ns, stringValue);
+    const previousMeta = safeJson(rawGet(metaKey(canonical)), {}) || {};
+    rawSet(metaKey(canonical), JSON.stringify({
+      updatedAt: Date.now(),
+      revision: Number(previousMeta.revision || 0) + 1,
+      deviceId: getDeviceId(),
+      page: FILE,
+      fullDatasetWrite: true
+    }));
+    if (options.audit !== false) appendAudit(canonical, oldValue, stringValue, options.action);
+    const operationId = options.enqueue === false ? null : enqueueSyncOperation(canonical);
+    emitDataChange(canonical, oldValue, stringValue, 'local-full', operationId);
+    return { changed: true, operationId };
+  }
+
   function patchStorage() {
     if (window.__CASHTOP_STORAGE_PATCHED__) return;
     window.__CASHTOP_STORAGE_PATCHED__ = true;
@@ -904,6 +1043,73 @@
     });
   }
 
+  const DEFAULT_MAIN_BRANCH_NAME = 'الفرع الرئيسي';
+  const DEFAULT_CASH_ACCOUNT_NAME = 'صندوق الكاش';
+
+  function ensureSystemDefaults() {
+    // الفرع الرئيسي سجل شركة واحد ثابت. نحافظ على نفس الفرع الرئيسي القديم إن وجد
+    // ونضعه أول القائمة حتى يبقى MAIN متوافقاً مع كل الصفحات القديمة والجديدة.
+    let branches = normalizeArrayValue(safeJson(localStorage.getItem('cashtop_branches'), []), []);
+    let main = branches.find(item => item && item.isMain === true) || branches[0] || null;
+    let branchesChanged = false;
+    if (!main) {
+      main = {
+        id: 'BR-01', name: DEFAULT_MAIN_BRANCH_NAME, address: '',
+        manager: '', managerUsername: '', managerPassword: '', managerActive: false,
+        status: 'نشط', allowTransfer: false, isMain: true, isDefault: true, locked: true
+      };
+      branches = [main];
+      branchesChanged = true;
+    } else {
+      const originalIndex = branches.indexOf(main);
+      if (originalIndex > 0) {
+        branches.splice(originalIndex, 1);
+        branches.unshift(main);
+        branchesChanged = true;
+      }
+      branches.forEach((branch, index) => {
+        const shouldBeMain = index === 0;
+        if (Boolean(branch.isMain) !== shouldBeMain) { branch.isMain = shouldBeMain; branchesChanged = true; }
+      });
+      if (main.name !== DEFAULT_MAIN_BRANCH_NAME) { main.name = DEFAULT_MAIN_BRANCH_NAME; branchesChanged = true; }
+      if (main.status !== 'نشط') { main.status = 'نشط'; branchesChanged = true; }
+      if (main.isDefault !== true) { main.isDefault = true; branchesChanged = true; }
+      if (main.locked !== true) { main.locked = true; branchesChanged = true; }
+    }
+    if (branchesChanged) localStorage.setItem('cashtop_branches', JSON.stringify(branches));
+
+    // كل فرع يملك قاعدة صناديق مستقلة. لذلك نضمن صندوق كاش ثابتاً للفرع الحالي.
+    const funds = safeJson(localStorage.getItem('cashtop_funds_db'), {}) || {};
+    funds.accounts = normalizeArrayValue(funds.accounts || [], []);
+    funds.accountLogs = normalizeArrayValue(funds.accountLogs || [], []);
+    let defaultCash = funds.accounts.find(account => account?.isDefaultCash === true)
+      || funds.accounts.find(account => ['صندوق الكاش', 'صندوق الكاش الرئيسي'].includes(String(account?.name || '').trim()));
+    let fundsChanged = false;
+    if (!defaultCash) {
+      defaultCash = {
+        id: 1000000001, name: DEFAULT_CASH_ACCOUNT_NAME, type: 'كاش', balance: 0,
+        notes: 'الصندوق الافتراضي للنظام', isDefaultCash: true, locked: true
+      };
+      // تجنب أي تعارض نادر مع رقم قديم.
+      while (funds.accounts.some(account => String(account?.id) === String(defaultCash.id))) defaultCash.id += 1;
+      funds.accounts.unshift(defaultCash);
+      fundsChanged = true;
+    } else {
+      if (defaultCash.name !== DEFAULT_CASH_ACCOUNT_NAME) { defaultCash.name = DEFAULT_CASH_ACCOUNT_NAME; fundsChanged = true; }
+      if (defaultCash.type !== 'كاش') { defaultCash.type = 'كاش'; fundsChanged = true; }
+      if (defaultCash.isDefaultCash !== true) { defaultCash.isDefaultCash = true; fundsChanged = true; }
+      if (defaultCash.locked !== true) { defaultCash.locked = true; fundsChanged = true; }
+    }
+    if (fundsChanged) localStorage.setItem('cashtop_funds_db', JSON.stringify(funds));
+
+    // اجعل جلسة مدير الشركة تشير صراحةً إلى الفرع الرئيسي كي لا يظهر "فرع غير معروف".
+    const session = getSession();
+    if (session && isCompanyAdminRole(session.role)) {
+      const next = { ...session, branchId: 'MAIN', dataBranchId: 'MAIN', branchRecordId: main.id, branchName: DEFAULT_MAIN_BRANCH_NAME };
+      if (JSON.stringify(next) !== JSON.stringify(session)) persistSession(next);
+    }
+  }
+
 
   const DATA_RESET_VERSION = 'original-zero-embedded-v1';
 
@@ -964,7 +1170,8 @@
     const comparableNext = {
       ...comparableCurrent,
       companyKey: companyKey || current.companyKey || '',
-      companyId: session.companyId || license.companyId || current.companyId || '',
+      tenantId: session.tenantId || session.companyId || license.tenantId || license.companyId || current.tenantId || current.companyId || '',
+      companyId: session.tenantId || session.companyId || license.tenantId || license.companyId || current.tenantId || current.companyId || '',
       companyName: session.companyName || license.companyName || current.companyName || '',
       status: license.status || current.status || 'active',
       startAt: license.startAt || current.startAt || '',
@@ -978,8 +1185,15 @@
 
   function validateSessionLocal(session) {
     if (!session) return { ok: false, reason: 'missing' };
-    const companyId = session.companyId || session.companyKey || 'unassigned';
+    const companyId = String(session.tenantId || session.companyId || session.companyKey || 'unassigned');
     const access = safeJson(rawGet(namespaceKey('cashtop_company_access', companyId)), {}) || {};
+    const accessTenantId = String(access.tenantId || access.companyId || companyId);
+    const sessionKey = String(session.companyKey || '').trim().toUpperCase();
+    const accessKey = String(access.companyKey || '').trim().toUpperCase();
+    if (Object.keys(access).length && accessTenantId !== companyId) return { ok: false, reason: 'tenant-mismatch' };
+    if (sessionKey && accessKey && sessionKey !== accessKey) return { ok: false, reason: 'tenant-mismatch' };
+    session.tenantId = companyId;
+    session.companyId = companyId;
     if (access.status && access.status !== 'active') return { ok: false, reason: 'stopped' };
     if (access.deleted === true) return { ok: false, reason: 'deleted' };
     const accessEnd = access.endAt ? new Date(access.endAt).getTime() : 0;
@@ -1023,6 +1237,8 @@
       session.branchName = branch.name || session.branchName;
       session.displayName = branch.manager || session.displayName;
       session.permissions = normalizePermissions(branch.managerPermissions || {});
+      // توافق مع الإصدارات القديمة: مفتاح السماح بالنقل لمدير الفرع يفعّل صلاحية النقل الدقيقة.
+      if (branch.allowTransfer === true) session.permissions['inventory.transfer'] = true;
       session.authVersion = branch.managerAuthVersion || branch.updatedAt || 0;
     } else if (isCompanyAdminRole(role)) {
       if (access.manager && (access.manager.active === false || (session.username && access.manager.username && String(access.manager.username).toLowerCase() !== String(session.username).toLowerCase()))) {
@@ -1031,7 +1247,7 @@
       session.branchId = 'MAIN'; session.dataBranchId = 'MAIN';
       session.permissions = session.permissions || {};
     }
-    rawSet('cashtop_session', JSON.stringify(session));
+    persistSession(session);
     return { ok: true, session };
   }
 
@@ -1049,8 +1265,13 @@
       }
     } catch (_) { /* local session is still cleared */ }
     const companyId = companyIdFromSession();
-    try { sessionStorage.removeItem(`ct_firebase_state::${encodeURIComponent(companyId)}`); } catch (_) {}
-    rawRemove('cashtop_session');
+    const currentSession = getSession();
+    try {
+      sessionStorage.removeItem(`ct_firebase_state::${encodeURIComponent(companyId)}`);
+      sessionStorage.removeItem(TAB_SESSION_KEY);
+    } catch (_) {}
+    const globalSession = safeJson(rawGet('cashtop_session'), null);
+    if (!globalSession || sessionTenantId(globalSession) === sessionTenantId(currentSession)) rawRemove('cashtop_session');
     redirectToLogin(reason || 'logout');
   }
 
@@ -1238,13 +1459,13 @@
   }
 
   function firstAllowedPage(session = getSession()) {
-    return Object.keys(PAGE_PERMISSIONS).find(file => can(PAGE_PERMISSIONS[file], session)) || 'setting.html';
+    return Object.keys(PAGE_PERMISSIONS).find(file => permissionAllowed(PAGE_PERMISSIONS[file], session)) || 'setting.html';
   }
 
   function enforceCurrentPageAccess(session = getSession()) {
     if (FILE === 'setting.html') return true;
     const required = PAGE_PERMISSIONS[FILE];
-    if (!required || can(required, session)) return true;
+    if (!required || permissionAllowed(required, session)) return true;
     const fallback = firstAllowedPage(session);
     if (fallback && fallback !== FILE) {
       location.replace(fallback);
@@ -1328,7 +1549,7 @@
     root.querySelectorAll?.('.ct-sidebar a[href], .ct-bottom-nav a[href]').forEach(link => {
       const { file } = linkedPageInfo(link);
       const required = PAGE_PERMISSIONS[file];
-      link.hidden = file === 'setting.html' ? false : Boolean(required && !can(required, session));
+      link.hidden = file === 'setting.html' ? false : Boolean(required && !permissionAllowed(required, session));
     });
     root.querySelectorAll?.('[data-ct-permission], [data-ct-permission-any]').forEach(element => {
       const allowed = permissionAllowed(readPermissionRequirement(element), session);
@@ -1556,9 +1777,11 @@
       };
     });
     return {
-      format: 'cashtop-backup-v3',
+      format: 'cashtop-backup-v4',
       exportedAt: new Date().toISOString(),
-      companyId: session.companyId || session.companyKey,
+      tenantId: session.tenantId || session.companyId || session.companyKey,
+      companyId: session.tenantId || session.companyId || session.companyKey,
+      companyKey: session.companyKey || '',
       companyName: session.companyName,
       datasets
     };
@@ -1592,11 +1815,15 @@
     if (!isBackupImportEnabled()) throw new Error('استيراد النسخ مقفل لهذا المفتاح. افتحه من لوحة المشرف أولاً.');
     const text = await file.text();
     const backup = safeJson(text, null);
-    if (!backup || !['cashtop-backup-v2', 'cashtop-backup-v3'].includes(backup.format) || !backup.datasets) throw new Error('صيغة النسخة الاحتياطية غير صحيحة');
+    if (!backup || !['cashtop-backup-v2', 'cashtop-backup-v3', 'cashtop-backup-v4'].includes(backup.format) || !backup.datasets) throw new Error('صيغة النسخة الاحتياطية غير صحيحة');
     const session = getSession() || {};
-    const currentCompany = String(session.companyId || session.companyKey || '');
-    if (backup.companyId && currentCompany && String(backup.companyId) !== currentCompany) {
+    const currentCompany = String(session.tenantId || session.companyId || session.companyKey || '');
+    const backupTenant = String(backup.tenantId || backup.companyId || '');
+    if (backupTenant && currentCompany && backupTenant !== currentCompany) {
       throw new Error('هذه النسخة تخص شركة أخرى ولا يمكن دمجها داخل الشركة الحالية');
+    }
+    if (backup.companyKey && session.companyKey && String(backup.companyKey).trim().toUpperCase() !== String(session.companyKey).trim().toUpperCase()) {
+      throw new Error('مفتاح النسخة الاحتياطية لا يطابق مفتاح الشركة الحالية');
     }
     // التخزين المحلي أولاً؛ اعتراض localStorage ينشئ العمليات المعلقة لكل قسم.
     Object.entries(backup.datasets).forEach(([key, entry]) => {
@@ -2160,6 +2387,8 @@
     DATA_KEYS: [...DATA_KEYS],
     aliases: { ...ALIASES },
     getSession,
+    persistSession,
+    tenantIdFromSession,
     logout,
     showToast,
     syncNow,
@@ -2176,6 +2405,10 @@
     rawGet,
     rawSet,
     getRawCompanyDataset,
+    setRawCompanyDataset,
+    ensureSystemDefaults,
+    DEFAULT_MAIN_BRANCH_NAME,
+    DEFAULT_CASH_ACCOUNT_NAME,
     branchIdFromSession,
     currentPlan,
     PLUS_LIMITS,
@@ -2198,7 +2431,7 @@
   if (IS_APP_PAGE) {
     addCoreAssets();
     patchStorage();
-    if (ensureAuthenticated()) { seedCompanyStorage(); bootstrapCompanyAccess(); }
+    if (ensureAuthenticated()) { seedCompanyStorage(); bootstrapCompanyAccess(); ensureSystemDefaults(); }
 
     window.addEventListener('online', () => { updateNetworkStatus(); syncNow({ manual: false }); });
     window.addEventListener('cashtop:sync-queue-changed', updateSyncBadge);

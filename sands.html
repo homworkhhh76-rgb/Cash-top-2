@@ -216,10 +216,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -1111,24 +1111,18 @@
             showToast("تم تصدير الإكسل بنجاح.", "success");
         }
 
-        function exportAllVouchersPDF() {
-            if(vouchersDB.length === 0) { showToast("لا توجد بيانات للتصدير", "warning"); return;}
+        async function exportAllVouchersPDF() {
+            if(vouchersDB.length === 0) { showToast("لا توجد بيانات للتصدير", "warning"); return; }
             prepareGlobalExport();
             const area = document.getElementById("exportAllTemplate");
-            
-            showToast("جاري المعالجة... يرجى الانتظار", "success");
-
-            html2canvas(area, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`سجل_السندات_الشامل_${Date.now()}.pdf`);
+            showToast("جاري إنشاء سجل السندات كجدول PDF...", "success");
+            try {
+                await CashtopExport.exportElementTablesToPDF(area, `سجل_السندات_الشامل_${Date.now()}.pdf`, {
+                    title: 'سجل فواتير وسندات القبض والصرف',
+                    orientation: 'landscape'
+                });
                 showToast("تم التصدير لـ PDF بنجاح.", "success");
-            });
+            } catch (err) { console.error(err); showToast('تعذر إنشاء PDF.', 'error'); }
         }
 
         function exportAllVouchersImage() {
@@ -1186,23 +1180,30 @@
             window.print();
         }
 
-        function exportVoucherPDF(id) {
+        async function exportVoucherPDF(id) {
             if(!prepareIndividualVoucherPrint(id)) return;
-            showToast("جاري إعداد السند... يرجى الانتظار", "success");
-
-            let v = vouchersDB.find(x => x.id === id);
-            html2canvas(document.getElementById("individualVoucherTemplate"), { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`${v.refNumber}_${Date.now()}.pdf`);
-                
+            const v = vouchersDB.find(x => x.id === id);
+            if (!v) return;
+            const accName = fundsDB.accounts.find(a => a.id == v.accountId)?.name || '-';
+            const rows = [
+                ['رقم السند', v.refNumber || '-'],
+                ['نوع السند', v.type || '-'],
+                ['التاريخ', v.date || '-'],
+                ['الصندوق / الحساب', accName],
+                ['الجهة المعنية', v.relationName || '-'],
+                ['المبلغ (₪)', parseFloat(v.amount || 0).toFixed(2)],
+                ['البيان / الملاحظات', v.notes || 'دفعة مالية']
+            ];
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: `${v.type === 'قبض' ? 'سند قبض مالي' : 'سند صرف مالي'} — ${v.refNumber || ''}`,
+                    columns: ['البيان', 'القيمة'],
+                    rows,
+                    filename: `${v.refNumber || 'سند'}_${Date.now()}.pdf`,
+                    orientation: 'portrait'
+                });
                 showToast("تم تنزيل السند لـ PDF بنجاح.", "success");
-            });
+            } catch (err) { console.error(err); showToast('تعذر إنشاء السند PDF.', 'error'); }
         }
 
         function exportVoucherImage(id) {
@@ -1233,6 +1234,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"sands.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

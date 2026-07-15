@@ -63,6 +63,29 @@
         .data-table th { font-weight: bold; color: #333; padding: 12px 10px; border-bottom: 2px solid #ddd; background-color: #f9f9f9; white-space: nowrap; }
         .data-table td { padding: 12px 10px; border-bottom: 1px solid #f4f4f4; vertical-align: middle; white-space: nowrap; }
 
+
+        /* واجهة احترافية لمتابعة العملاء والديون */
+        .top-cards-grid .main-card { border-radius: 12px; position: relative; overflow: hidden; box-shadow: 0 8px 24px rgba(31,41,55,.08); }
+        .top-cards-grid .main-card::after { content: ''; position: absolute; inset-inline-start: -28px; bottom: -42px; width: 110px; height: 110px; border-radius: 50%; background: rgba(255,255,255,.09); }
+        .debt-filter-bar { background: #fff; border: 1px solid #e7eaf0; border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 14px; box-shadow: 0 5px 18px rgba(31,41,55,.05); }
+        .debt-filter-copy strong { display: block; color: #242a36; font-size: 14px; }
+        .debt-filter-copy span { display: block; color: #87909f; font-size: 11px; margin-top: 2px; }
+        .debt-filter-chips { display: flex; gap: 7px; flex-wrap: wrap; }
+        .debt-filter-chip { border: 1px solid #dfe3ea; background: #fff; color: #5f6877; border-radius: 999px; padding: 7px 12px; font-family: inherit; font-size: 11px; font-weight: 700; cursor: pointer; transition: .18s ease; }
+        .debt-filter-chip:hover { border-color: #605ca8; color: #605ca8; }
+        .debt-filter-chip.active { background: #605ca8; color: #fff; border-color: #605ca8; box-shadow: 0 4px 12px rgba(96,92,168,.22); }
+        .table-container { border-top: 0; border: 1px solid #e6e9ef; border-radius: 12px; box-shadow: 0 8px 28px rgba(31,41,55,.06); }
+        .table-title-wrap { min-width: 0; }
+        .table-title-sub { color: #8a93a2; font-size: 11px; margin-top: 2px; }
+        .table-responsive-box { border: 1px solid #edf0f4; border-radius: 10px; }
+        .data-table thead th { position: sticky; top: 0; z-index: 2; background: #f7f8fb; color: #303746; }
+        .data-table tbody tr { transition: background .16s ease, box-shadow .16s ease; }
+        .data-table tbody tr:hover { background: #fbfbfe; box-shadow: inset -3px 0 0 #605ca8; }
+        .data-table tbody tr.is-debtor { box-shadow: inset -3px 0 0 rgba(221,75,57,.55); }
+        .data-table tbody tr.is-creditor { box-shadow: inset -3px 0 0 rgba(0,166,90,.55); }
+        .balance-stack { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+        .badge-limit-warning { display: inline-flex; align-items: center; gap: 4px; background: #fff3cd; color: #8a6500; border: 1px solid #ffe08a; padding: 3px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+
         .badge-group { background-color: rgba(96, 92, 168, 0.1); color: #605ca8; padding: 3px 8px; border-radius: 3px; font-weight: bold; }
         .badge-balance-debt { background-color: #fdeaea; color: #dd4b39; padding: 3px 8px; border-radius: 3px; font-weight: bold; }
         .badge-balance-credit { background-color: #e6f7ed; color: #00a65a; padding: 3px 8px; border-radius: 3px; font-weight: bold; }
@@ -171,6 +194,10 @@
             .export-group { display: flex; flex-direction: row; overflow-x: auto; gap: 8px; width: 100%; padding-bottom: 5px; scrollbar-width: none; }
             .export-group::-webkit-scrollbar { display: none; }
             .btn-export { padding: 8px 14px; font-size: 12px; flex-shrink: 0; }
+            .debt-filter-bar { flex-direction: column; align-items: stretch; padding: 12px; }
+            .debt-filter-chips { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 3px; scrollbar-width: none; }
+            .debt-filter-chips::-webkit-scrollbar { display: none; }
+            .debt-filter-chip { flex: 0 0 auto; }
             .modal-box { padding: 20px 12px 12px 12px; }
             .form-row { gap: 18px 10px; margin-bottom: 10px; }
             .form-control { padding: 8px 10px; font-size: 12px; border-radius: 5px; }
@@ -190,10 +217,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -339,9 +366,22 @@
             <button type="button" class="btn-add-customer" id="openCustomerModalBtn" data-open-customer-modal><i class="fa-solid fa-user-plus"></i> إضافة عميل جديد</button>
         </div>
 
+        <div class="debt-filter-bar">
+            <div class="debt-filter-copy">
+                <strong>مركز متابعة ديون العملاء</strong>
+                <span>فلترة فورية للمديونيات والأرصدة الدائنة والعملاء المتجاوزين للحد الائتماني.</span>
+            </div>
+            <div class="debt-filter-chips" role="group" aria-label="فلترة حالة حساب العميل">
+                <button type="button" class="debt-filter-chip active" data-debt-filter="all" onclick="setDebtFilter('all', this)">الكل</button>
+                <button type="button" class="debt-filter-chip" data-debt-filter="debt" onclick="setDebtFilter('debt', this)">مدينون لنا</button>
+                <button type="button" class="debt-filter-chip" data-debt-filter="credit" onclick="setDebtFilter('credit', this)">دائنون علينا</button>
+                <button type="button" class="debt-filter-chip" data-debt-filter="limit" onclick="setDebtFilter('limit', this)">متجاوزو الحد</button>
+            </div>
+        </div>
+
         <div class="table-container" id="printableTableArea">
             <div class="table-header-wrapper">
-                <div class="table-title">سجل جرد ومراقبة حسابات العملاء</div>
+                <div class="table-title-wrap"><div class="table-title">سجل جرد ومراقبة حسابات العملاء</div><div class="table-title-sub">الأرصدة، حدود الائتمان، الديون والسجل المالي في شاشة واحدة</div></div>
                 <div class="export-group">
                     <button type="button" class="btn-export excel" onclick="exportTableToExcel()"><i class="fa-solid fa-file-excel"></i> ديون العملاء Excel</button>
                     <button type="button" class="btn-export pdf" onclick="exportTableToPDF()"><i class="fa-solid fa-file-pdf"></i> ديون العملاء PDF</button>
@@ -543,6 +583,7 @@
         }));
         let customerSaveBusy = false;
         let customersInitialized = false;
+        let activeDebtFilter = 'all';
 
         function runCustomerStep(label, callback) {
             try { return callback(); }
@@ -615,12 +656,15 @@
                 const safeId = String(cust.id || '');
 
                 const tr = document.createElement('tr');
+                tr.className = balanceValue > 0 ? 'customer-row is-debtor' : (balanceValue < 0 ? 'customer-row is-creditor' : 'customer-row');
+                const exceededLimit = balanceValue > 0 && limitValue > 0 && balanceValue > limitValue;
+                const balanceCell = `<span class="balance-stack">${balanceBadge}${exceededLimit ? '<span class="badge-limit-warning"><i class="fa-solid fa-triangle-exclamation"></i> متجاوز الحد</span>' : ''}</span>`;
                 tr.innerHTML = `
                     <td><strong>${escapeHtml(safeName)}</strong></td>
                     <td dir="ltr" style="color: #555; font-weight: 600;">${escapeHtml(safePhone || '-')}</td>
                     <td><span class="badge-group">${escapeHtml(groupName)}</span></td>
                     <td style="font-weight: bold; color: #444;">${limitValue.toFixed(2)}</td>
-                    <td>${balanceBadge}</td>
+                    <td>${balanceCell}</td>
                     <td class="actions-wrapper">
                         <div class="actions-wrapper">
                             <button type="button" class="action-btn btn-whatsapp" data-customer-action="wa" data-customer-id="${escapeHtml(safeId)}" title="مراسلة واتساب"><i class="fa-brands fa-whatsapp"></i></button>
@@ -640,18 +684,32 @@
             const debtorsEl = document.getElementById('statDebtors');
             const creditorsEl = document.getElementById('statCreditors');
             const limitsEl = document.getElementById('statLimits');
-            if (totalEl) totalEl.innerText = customersData.length + ' عميل';
+            if (totalEl) totalEl.innerText = data.length + ' عميل';
             if (debtorsEl) debtorsEl.innerText = totalDebtors.toFixed(2);
             if (creditorsEl) creditorsEl.innerText = totalCreditors.toFixed(2);
             if (limitsEl) limitsEl.innerText = limitsExceeded + ' عملاء';
         }
 
         function filterTable() {
-            const q = String(document.getElementById('searchInput')?.value || '').toLowerCase();
-            const filtered = customersData.filter(c =>
-                String(c?.name || '').toLowerCase().includes(q) || String(c?.phone || '').includes(q)
-            );
+            const q = String(document.getElementById('searchInput')?.value || '').trim().toLowerCase();
+            const filtered = customersData.filter(customer => {
+                const nameMatches = String(customer?.name || '').toLowerCase().includes(q);
+                const phoneMatches = String(customer?.phone || '').includes(q);
+                if (q && !nameMatches && !phoneMatches) return false;
+                const balance = numeric(customer?.balance);
+                const limit = numeric(customer?.creditLimit);
+                if (activeDebtFilter === 'debt') return balance > 0;
+                if (activeDebtFilter === 'credit') return balance < 0;
+                if (activeDebtFilter === 'limit') return balance > 0 && limit > 0 && balance > limit;
+                return true;
+            });
             renderTable(filtered);
+        }
+
+        function setDebtFilter(filter, button) {
+            activeDebtFilter = ['all', 'debt', 'credit', 'limit'].includes(filter) ? filter : 'all';
+            document.querySelectorAll('.debt-filter-chip').forEach(chip => chip.classList.toggle('active', chip === button || chip.dataset.debtFilter === activeDebtFilter && !button));
+            filterTable();
         }
 
         // ==========================================
@@ -1005,14 +1063,19 @@
         function getCustomerDebtRows() {
             return customersData.map((customer, index) => {
                 const balance = numeric(customer.balance);
+                const groupName = groupsData.find(group => String(group?.id) === String(customer.group || ''))?.name || 'بدون مجموعة';
                 return {
                     sequence: index + 1,
                     name: String(customer.name || 'عميل بدون اسم'),
                     phone: String(customer.phone || ''),
+                    address: String(customer.address || ''),
+                    groupName: String(groupName),
+                    creditLimit: numeric(customer.creditLimit),
                     debt: Math.max(0, balance),
                     credit: Math.max(0, -balance),
                     balance,
-                    status: balance > 0 ? 'مدين' : balance < 0 ? 'دائن' : 'متوازن'
+                    status: balance > 0 ? 'مدين' : balance < 0 ? 'دائن' : 'متوازن',
+                    notes: String(customer.notes || '')
                 };
             });
         }
@@ -1077,25 +1140,11 @@
         }
 
         async function exportHtmlPagesToPdf(pageHtmlList, fileName, orientation = 'p') {
-            if (!pageHtmlList.length) return;
-            const { jsPDF } = window.jspdf;
-            const host = createExportHost();
-            const pdf = new jsPDF(orientation, 'mm', 'a4');
-            try {
-                for (let i = 0; i < pageHtmlList.length; i++) {
-                    host.innerHTML = pageHtmlList[i];
-                    const page = host.firstElementChild;
-                    const canvas = await html2canvas(page, { scale: 1.6, backgroundColor: '#ffffff', useCORS: true, logging: false });
-                    const imgData = canvas.toDataURL('image/jpeg', 0.96);
-                    const pageWidth = pdf.internal.pageSize.getWidth();
-                    const pageHeight = pdf.internal.pageSize.getHeight();
-                    if (i > 0) pdf.addPage('a4', orientation);
-                    pdf.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageHeight);
-                }
-                pdf.save(fileName);
-            } finally {
-                host.remove();
-            }
+            if (!pageHtmlList || !pageHtmlList.length) return;
+            return CashtopExport.exportHtmlPagesToPDF(pageHtmlList, fileName, {
+                title: 'تقرير كاش توب',
+                orientation: orientation === 'l' ? 'landscape' : 'portrait'
+            });
         }
 
         function buildDebtPdfPages(rows) {
@@ -1124,22 +1173,33 @@
             const data = rows.map(row => ({
                 '#': row.sequence,
                 'اسم العميل': row.name,
-                'رقم الجوال': row.phone,
+                'رقم الجوال': row.phone || '-',
+                'العنوان': row.address || '-',
+                'المجموعة': row.groupName || 'بدون مجموعة',
+                'حد الائتمان': numeric(row.creditLimit),
                 'الحالة': row.status,
-                'الدين المستحق': row.debt,
-                'رصيد دائن': row.credit,
-                'الرصيد الصافي': row.balance
+                'الدين المستحق': numeric(row.debt),
+                'رصيد دائن': numeric(row.credit),
+                'الرصيد الصافي': numeric(row.balance),
+                'ملاحظات': row.notes || '-'
             }));
             const ws = XLSX.utils.json_to_sheet(data);
-            ws['!cols'] = [{wch:7},{wch:28},{wch:18},{wch:12},{wch:16},{wch:16},{wch:16}];
+            ws['!cols'] = [{wch:7},{wch:28},{wch:18},{wch:30},{wch:20},{wch:16},{wch:12},{wch:16},{wch:16},{wch:16},{wch:35}];
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'ديون العملاء');
-            XLSX.writeFile(wb, `ديون_العملاء_${new Date().toISOString().slice(0,10)}.xlsx`);
+            XLSX.utils.book_append_sheet(wb, ws, 'بيانات وديون العملاء');
+            XLSX.writeFile(wb, `بيانات_وديون_العملاء_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
 
         async function exportTableToPDF() {
             const rows = getCustomerDebtRows();
-            await exportHtmlPagesToPdf(buildDebtPdfPages(rows), `ديون_العملاء_${new Date().toISOString().slice(0,10)}.pdf`, 'p');
+            try {
+                const pages = buildDebtPdfPages(rows);
+                await exportHtmlPagesToPdf(pages, `بيانات_وديون_العملاء_${new Date().toISOString().slice(0,10)}.pdf`, 'p');
+                showToast('تم تحميل تقرير ديون العملاء PDF بنجاح.', 'success');
+            } catch (err) {
+                console.error(err);
+                showToast('تعذر إنشاء PDF العملاء.', 'error');
+            }
         }
 
         function exportCustomerHistoryExcel() {
@@ -1192,7 +1252,14 @@
             const customer = customersData.find(item => String(item?.id) === String(activeHistoryCustomerId));
             if (!customer) return showToast('افتح سجل العميل أولاً.', 'error');
             const rows = getCustomerHistoryRows(customer);
-            await exportHtmlPagesToPdf(buildCustomerHistoryPdfPages(customer, rows), `سجل_${sanitizeFileName(customer.name)}_${new Date().toISOString().slice(0,10)}.pdf`, 'l');
+            try {
+                const pages = buildCustomerHistoryPdfPages(customer, rows);
+                await exportHtmlPagesToPdf(pages, `سجل_${sanitizeFileName(customer.name)}_${new Date().toISOString().slice(0,10)}.pdf`, 'l');
+                showToast('تم تحميل سجل العميل PDF بنجاح.', 'success');
+            } catch (err) {
+                console.error(err);
+                showToast('تعذر إنشاء سجل العميل PDF.', 'error');
+            }
         }
 
         function exportTableToImage() {
@@ -1210,24 +1277,6 @@
             });
         }
 
-        function exportTableToPDF() {
-            const { jsPDF } = window.jspdf;
-            const area = document.getElementById("printableTableArea");
-            document.querySelectorAll('.actions-wrapper').forEach(el => el.style.display = 'none');
-
-            html2canvas(area, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`سجل_العملاء_${Date.now()}.pdf`);
-                
-                document.querySelectorAll('.actions-wrapper').forEach(el => el.style.display = '');
-            });
-        }
 
         // ==========================================
         // وظائف التصدير لصف العميل الفردي (كشف/بطاقة)
@@ -1297,25 +1346,18 @@
             runCustomerStep('pageshow events', bindCustomerModalEvents);
         });
 
-        function exportRowPDF(id) {
-            if(!prepareHiddenStatement(id)) return;
-            const { jsPDF } = window.jspdf;
-            const area = document.getElementById('hiddenStatement');
-            
-            area.style.top = '0';
-            area.style.zIndex = '-1';
-
-            html2canvas(area, { scale: 2 }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const pdf = new jsPDF('p', 'mm', 'a5'); // استخدام A5 لبطاقة العميل
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`كشف_حساب_${id}.pdf`);
-                area.style.top = '-9999px';
-            });
+        async function exportRowPDF(id) {
+            const customer = customersData.find(c => String(c.id) === String(id));
+            if (!customer) return;
+            const rows = getCustomerHistoryRows(customer);
+            try {
+                const pages = buildCustomerHistoryPdfPages(customer, rows);
+                await exportHtmlPagesToPdf(pages, `كشف_حساب_${sanitizeFileName(customer.name || id)}_${Date.now()}.pdf`, 'l');
+                showToast('تم تحميل كشف حساب العميل PDF بنجاح.', 'success');
+            } catch (err) {
+                console.error(err);
+                showToast('تعذر إنشاء كشف العميل.', 'error');
+            }
         }
 
     </script>
@@ -1332,6 +1374,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"customers.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

@@ -156,10 +156,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -424,19 +424,29 @@
                 <div class="form-row">
                     <div class="form-group">
                         <select class="form-control" id="transSourceBranch" required onchange="handleSourceBranchChange()"></select>
-                        <label>الفرع المُصدِّر</label>
+                        <label>1. الفرع المُصدِّر</label>
                     </div>
                     <div class="form-group">
-                        <select class="form-control" id="transDestBranch" required></select>
-                        <label>الفرع المُستلِم</label>
+                        <select class="form-control" id="transSourceLocation" required onchange="handleSourceLocationChange()"></select>
+                        <label>2. المخزن / المحل المنقول منه</label>
+                    </div>
+                </div>
+                <div class="form-row" style="margin-bottom:0;">
+                    <div class="form-group">
+                        <select class="form-control" id="transDestBranch" required onchange="handleDestinationBranchChange()"></select>
+                        <label>3. الفرع المُستلِم</label>
+                    </div>
+                    <div class="form-group">
+                        <select class="form-control" id="transDestLocation" required></select>
+                        <label>4. المخزن / المحل المنقول إليه</label>
                     </div>
                 </div>
             </div>
 
             <div class="form-row full">
                 <div class="form-group">
-                    <input type="text" class="form-control" id="transferSearchInput" placeholder="اكتب اسم المنتج أو الباركود هنا للبحث..." oninput="searchTransferProducts()" autocomplete="off">
-                    <label>2. ابحث عن المنتجات الموجودة في الفرع المصدر</label>
+                    <input type="text" class="form-control" id="transferSearchInput" placeholder="اختر الفرع والمخزن المصدر أولاً، ثم ابحث بالاسم أو الباركود..." oninput="searchTransferProducts()" autocomplete="off">
+                    <label>5. المنتجات المتوفرة فعلياً في موقع المصدر المختار</label>
                     <div id="transferSuggestions" class="suggestions-box"></div>
                 </div>
             </div>
@@ -539,8 +549,8 @@
                     <thead style="position: sticky; top: 0; background: #f9f9f9; z-index: 2;">
                         <tr>
                             <th>التاريخ والوقت</th>
-                            <th>الفرع المصدر</th>
-                            <th>الفرع المستلم</th>
+                            <th>المصدر (الفرع / المخزن)</th>
+                            <th>الوجهة (الفرع / المخزن)</th>
                             <th>المنتجات والكميات المنقولة</th>
                         </tr>
                     </thead>
@@ -585,6 +595,8 @@
         let branchesData = [];
         let storesData = [];
         let productsData = [];
+        let transferProductsData = []; // النسخة الكاملة للشركة لاستخدام النقل العابر للفروع
+        let transferStoresData = [];   // كل مخازن الشركة مع branchId الحقيقي
         let branchTransferHistoryData = []; // قاعدة بيانات مخصصة لنقل الفروع
         let transferCart = [];
         
@@ -597,6 +609,24 @@
             } catch (_) { return []; }
         }
 
+        function readFullArrayDataset(key) {
+            try {
+                const raw = window.Cashtop?.getRawCompanyDataset?.(key);
+                const parsed = JSON.parse(raw == null ? (localStorage.getItem(key) || '[]') : raw);
+                return Array.isArray(parsed) ? parsed : (parsed && typeof parsed === 'object' ? Object.values(parsed) : []);
+            } catch (_) { return []; }
+        }
+
+        function saveFullCompanyDataset(key, value) {
+            if (window.Cashtop?.setRawCompanyDataset) {
+                const result = window.Cashtop.setRawCompanyDataset(key, value);
+                Promise.resolve(window.Cashtop.syncNow?.({ manual: false })).catch(() => {});
+                return result;
+            }
+            localStorage.setItem(key, JSON.stringify(value));
+            return { changed: true };
+        }
+
         function isCompanyAdmin() {
             return ['admin', 'owner', 'company-admin'].includes(String(sessionUser.role || '').toLowerCase());
         }
@@ -606,6 +636,8 @@
         }
 
         function initSystem() {
+            try { window.Cashtop?.ensureSystemDefaults?.(); } catch (_) {}
+            sessionUser = JSON.parse(localStorage.getItem('cashtop_session')) || sessionUser || { role: 'admin', branchId: 'MAIN', branchName: 'الفرع الرئيسي' };
             branchesData = readArrayDataset('cashtop_branches');
             // حذف الاسم التالف المعروف فقط. لا نحذف أسماء صحيحة مثل
             // «الفرع الرئيسي» أو «فرع البلد» لأنها قد تكون أسماء أدخلها المستخدم.
@@ -675,7 +707,7 @@
             btnBranch.style.display = 'none';
             btnManager.style.display = 'none';
             btnHistory.style.display = 'flex';
-            btnTransfer.style.display = branch?.allowTransfer ? 'flex' : 'none';
+            btnTransfer.style.display = window.Cashtop?.can?.('inventory.transfer', sessionUser) ? 'flex' : 'none';
         }
 
         function updateDashboard() {
@@ -701,17 +733,19 @@
             branchesData.forEach(item => {
                 const statusBadge = item.status === 'نشط' ? '<span class="badge-active">نشط</span>' : '<span class="badge-frozen">مجمد</span>';
                 const transferPerm = item.allowTransfer ? '<span class="badge-permission"><i class="fa-solid fa-check"></i> يملك صلاحية النقل</span>' : '';
+                const isLockedMain = item.isMain === true || item.isDefault === true || item.locked === true;
                 const adminActions = isCompanyAdmin() ? `
-                    <button class="action-btn-clean btn-clean-edit" title="تعديل" onclick="openEditBranchModal('${item.id}')"><i class="fa-solid fa-pen-to-square"></i></button>
+                    <button class="action-btn-clean btn-clean-edit" title="${isLockedMain ? 'تعديل عنوان الفرع الرئيسي' : 'تعديل'}" onclick="openEditBranchModal('${item.id}')"><i class="fa-solid fa-pen-to-square"></i></button>
+                    ${isLockedMain ? '<span title="الفرع الرئيسي ثابت ولا يمكن تجميده أو حذفه" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;color:#16a34a;"><i class="fa-solid fa-lock"></i></span>' : `
                     <button class="action-btn-clean btn-clean-freeze" title="${item.status === 'نشط' ? 'تجميد' : 'تنشيط'}" onclick="toggleBranchStatus('${item.id}')"><i class="fa-solid ${item.status === 'نشط' ? 'fa-snowflake' : 'fa-sun'}"></i></button>
-                    <button class="action-btn-clean btn-clean-delete" title="حذف" onclick="openDeleteBranchModal('${item.id}')"><i class="fa-solid fa-trash-can"></i></button>` : '';
+                    <button class="action-btn-clean btn-clean-delete" title="حذف" onclick="openDeleteBranchModal('${item.id}')"><i class="fa-solid fa-trash-can"></i></button>`}` : '';
                 const managerInfo = item.manager
                     ? `<div style="font-weight:bold;color:#333;">${item.manager}</div><small style="color:#64748b;">${item.managerUsername || 'لم يُحدد اسم دخول'}</small>`
                     : '<span style="color:#aaa;font-style:italic;">غير معين</span>';
 
                 tbody.innerHTML += `<tr>
                     <td style="font-family:monospace;font-weight:bold;color:#605ca8;">${item.id}</td>
-                    <td style="font-weight:bold;">${item.name}</td>
+                    <td style="font-weight:bold;">${item.name}${isLockedMain ? ' <span style="font-size:10px;background:#dcfce7;color:#166534;padding:3px 7px;border-radius:999px;margin-right:5px;white-space:nowrap;"><i class="fa-solid fa-lock"></i> افتراضي</span>' : ''}</td>
                     <td>${item.address || '-'}</td>
                     <td>${managerInfo}${transferPerm}</td>
                     <td>${statusBadge}</td>
@@ -752,8 +786,11 @@
             let branch = branchesData.find(b => b.id === id);
             if(branch) {
                 document.getElementById('editBranchId').value = branch.id;
-                document.getElementById('editBranchName').value = branch.name;
-                document.getElementById('editBranchAddress').value = branch.address;
+                const editNameInput = document.getElementById('editBranchName');
+                const isLockedMain = branch.isMain === true || branch.isDefault === true || branch.locked === true;
+                editNameInput.value = isLockedMain ? 'الفرع الرئيسي' : branch.name;
+                editNameInput.disabled = isLockedMain;
+                document.getElementById('editBranchAddress').value = branch.address || '';
                 openModal('editBranchModal');
             }
         }
@@ -763,7 +800,9 @@
             let id = document.getElementById('editBranchId').value;
             let branch = branchesData.find(b => b.id === id);
             if(branch) {
-                branch.name = document.getElementById('editBranchName').value.trim();
+                const isLockedMain = branch.isMain === true || branch.isDefault === true || branch.locked === true;
+                branch.name = isLockedMain ? 'الفرع الرئيسي' : document.getElementById('editBranchName').value.trim();
+                branch.status = isLockedMain ? 'نشط' : branch.status;
                 branch.address = document.getElementById('editBranchAddress').value.trim();
                 localStorage.setItem('cashtop_branches', JSON.stringify(branchesData));
                 closeModal('editBranchModal');
@@ -773,13 +812,24 @@
         }
 
         function openDeleteBranchModal(id) {
+            const branch = branchesData.find(item => String(item.id) === String(id));
+            if (branch && (branch.isMain === true || branch.isDefault === true || branch.locked === true)) {
+                showToast('الفرع الرئيسي افتراضي وثابت ولا يمكن حذفه.', 'error');
+                return;
+            }
             document.getElementById('deleteBranchIdTarget').value = id;
             openModal('deleteBranchModal');
         }
 
         function confirmDeleteBranch() {
             const id = document.getElementById('deleteBranchIdTarget').value;
-            const removedWasMain = branchesData.find(branch => String(branch.id) === String(id))?.isMain === true;
+            const targetBranch = branchesData.find(branch => String(branch.id) === String(id));
+            if (targetBranch && (targetBranch.isMain === true || targetBranch.isDefault === true || targetBranch.locked === true)) {
+                closeModal('deleteBranchModal');
+                showToast('لا يمكن حذف الفرع الرئيسي.', 'error');
+                return;
+            }
+            const removedWasMain = targetBranch?.isMain === true;
             branchesData = branchesData.filter(branch => String(branch.id) !== String(id));
             const promotedMainId = removedWasMain && branchesData.length ? branchesData[0].id : null;
             if (promotedMainId) branchesData[0].isMain = true;
@@ -841,9 +891,10 @@
             document.getElementById('managerName').value = branch.manager || '';
             document.getElementById('managerUsername').value = branch.managerUsername || '';
             document.getElementById('managerPassword').value = branch.managerPassword || '';
-            document.getElementById('managerAllowTransfer').checked = branch.allowTransfer === true;
+            const managerPerms = window.Cashtop?.normalizePermissions?.(branch.managerPermissions || {}) || branch.managerPermissions || {};
+            document.getElementById('managerAllowTransfer').checked = branch.allowTransfer === true || managerPerms['inventory.transfer'] === true;
             document.getElementById('managerActiveSelect').value = branch.managerActive === false ? 'false' : 'true';
-            setManagerPermissionValues(branch.managerPermissions || defaultManagerPermissions());
+            setManagerPermissionValues({ ...(branch.managerPermissions || defaultManagerPermissions()), 'inventory.transfer': branch.allowTransfer === true || managerPerms['inventory.transfer'] === true });
             document.getElementById('removeManagerBtn').style.display = branch.managerUsername ? 'inline-flex' : 'none';
         }
         function openManagerModal() {
@@ -876,6 +927,7 @@
             const allowTransfer = document.getElementById('managerAllowTransfer').checked;
             const managerActive = document.getElementById('managerActiveSelect').value === 'true';
             const managerPermissions = collectManagerPermissions();
+            managerPermissions['inventory.transfer'] = allowTransfer;
             const branch = branchesData.find(item => String(item.id) === String(branchId));
             if (!branch || !managerName || !username || !password) return showToast('أكمل بيانات مدير الفرع', 'error');
 
@@ -906,6 +958,12 @@
         function toggleBranchStatus(id) {
             let branch = branchesData.find(b => b.id === id);
             if(branch) {
+                if (branch.isMain === true || branch.isDefault === true || branch.locked === true) {
+                    branch.status = 'نشط';
+                    localStorage.setItem('cashtop_branches', JSON.stringify(branchesData));
+                    showToast('الفرع الرئيسي يجب أن يبقى نشطاً ولا يمكن تجميده.', 'error');
+                    return;
+                }
                 branch.status = (branch.status === "نشط") ? "مجمد" : "نشط";
                 branch.managerAuthVersion = Date.now();
                 branch.updatedAt = new Date().toISOString();
@@ -915,72 +973,167 @@
         }
 
         // ==========================================
-        // النقل المخزني المتقدم (بالوحدة والقطعة)
+        // النقل العابر للفروع والمخازن
+        // المدير العام: من أي فرع/مخزن إلى أي فرع/مخزن.
+        // مدير الفرع/الموظف: المصدر مقيد بفرعه فقط، والوجهة أي فرع آخر.
         // ==========================================
-        
+
         function isMainBranch(branchId) {
             const branch = branchesData.find(item => String(item.id) === String(branchId));
             return branch?.isMain === true || (!branchesData.some(item => item.isMain === true) && String(branchesData[0]?.id || '') === String(branchId));
         }
 
+        function branchDataId(branchRecordId) {
+            return isMainBranch(branchRecordId) ? 'MAIN' : String(branchRecordId || '');
+        }
+
+        function canTransferInventory() {
+            return isCompanyAdmin() || window.Cashtop?.can?.('inventory.transfer', sessionUser) === true;
+        }
+
+        function storeBranchId(store) {
+            const value = store?.dataBranchId || store?.branchId;
+            return value == null || value === '' ? 'MAIN' : String(value);
+        }
+
+        function getStoresForBranch(branchRecordId) {
+            const dataId = branchDataId(branchRecordId);
+            return transferStoresData.filter(store => store && storeBranchId(store) === dataId && String(store.id || '') !== 'shop' && !String(store.id || '').startsWith('shop_'));
+        }
+
+        function getBranchName(branchId) {
+            return branchesData.find(branch => String(branch.id) === String(branchId))?.name || String(branchId || 'فرع غير معروف');
+        }
+
+        function getLocationName(branchId, locationId) {
+            if (String(locationId) === 'shop') return `المحل الرئيسي - ${getBranchName(branchId)}`;
+            const store = transferStoresData.find(item => String(item.id) === String(locationId));
+            return store ? `${store.name} - ${getBranchName(branchId)}` : `مخزن غير معروف - ${getBranchName(branchId)}`;
+        }
+
+        function populateLocationSelect(selectId, branchId, placeholder) {
+            const select = document.getElementById(selectId);
+            select.innerHTML = '';
+            const placeholderOption = new Option(placeholder, '');
+            placeholderOption.disabled = true;
+            placeholderOption.selected = true;
+            select.add(placeholderOption);
+            if (!branchId) return;
+            select.add(new Option(`المحل الرئيسي — ${getBranchName(branchId)}`, 'shop'));
+            getStoresForBranch(branchId).forEach(store => select.add(new Option(`مخزن: ${store.name}`, String(store.id))));
+        }
+
+        function locationBelongsToBranch(branchId, locationId) {
+            if (String(locationId) === 'shop') return true;
+            return getStoresForBranch(branchId).some(store => String(store.id) === String(locationId));
+        }
+
         function getExactBranchQty(product, branchId, variantIndex = null) {
-            if (!branchId) return 0;
+            if (!branchId || !product) return 0;
+            const dataId = branchDataId(branchId);
             if (product.hasVariants && variantIndex !== null) {
                 const variant = product.variants?.[variantIndex];
                 if (!variant) return 0;
-                // رصيد الفرع الرئيسي هو نفس رصيد المنتج المستخدم في الكاشير.
-                if (isMainBranch(branchId)) return Number(variant.qty || 0);
-                return Number(variant.branchStocks?.[branchId] || 0);
+                if (dataId === 'MAIN') return Math.max(0, Number(variant.qty || 0));
+                return Math.max(0, Number(variant.branchStocks?.[dataId] || 0));
             }
-            if (isMainBranch(branchId)) return Number(product.stockPieces || 0);
-            return Number(product.branchStocks?.[branchId] || 0);
+            if (dataId === 'MAIN') return Math.max(0, Number(product.stockPieces || 0));
+            return Math.max(0, Number(product.branchStocks?.[dataId] || 0));
+        }
+
+        function getLocationQty(product, branchId, locationId, variantIndex = null) {
+            if (String(locationId) === 'shop') return getExactBranchQty(product, branchId, variantIndex);
+            if (product.hasVariants && variantIndex !== null) {
+                return Math.max(0, Number(product.variants?.[variantIndex]?.storeStocks?.[locationId] || 0));
+            }
+            return Math.max(0, Number(product.storeStocks?.[locationId] || 0));
         }
 
         function changeBranchQty(product, branchId, pieces, variantIndex = null) {
             const delta = Number(pieces || 0);
+            const dataId = branchDataId(branchId);
             if (product.hasVariants && variantIndex !== null) {
                 const variant = product.variants?.[variantIndex];
                 if (!variant) return;
-                if (isMainBranch(branchId)) {
+                if (dataId === 'MAIN') {
                     variant.qty = Math.max(0, Number(variant.qty || 0) + delta);
                     product.stockPieces = Math.max(0, Number(product.stockPieces || 0) + delta);
                 } else {
-                    if (!variant.branchStocks || typeof variant.branchStocks !== 'object') variant.branchStocks = {};
-                    variant.branchStocks[branchId] = Math.max(0, Number(variant.branchStocks[branchId] || 0) + delta);
+                    variant.branchStocks = variant.branchStocks && typeof variant.branchStocks === 'object' ? variant.branchStocks : {};
+                    product.branchStocks = product.branchStocks && typeof product.branchStocks === 'object' ? product.branchStocks : {};
+                    variant.branchStocks[dataId] = Math.max(0, Number(variant.branchStocks[dataId] || 0) + delta);
+                    product.branchStocks[dataId] = Math.max(0, Number(product.branchStocks[dataId] || 0) + delta);
                 }
                 return;
             }
-            if (isMainBranch(branchId)) {
+            if (dataId === 'MAIN') {
                 product.stockPieces = Math.max(0, Number(product.stockPieces || 0) + delta);
             } else {
-                if (!product.branchStocks || typeof product.branchStocks !== 'object') product.branchStocks = {};
-                product.branchStocks[branchId] = Math.max(0, Number(product.branchStocks[branchId] || 0) + delta);
+                product.branchStocks = product.branchStocks && typeof product.branchStocks === 'object' ? product.branchStocks : {};
+                product.branchStocks[dataId] = Math.max(0, Number(product.branchStocks[dataId] || 0) + delta);
             }
         }
 
-        function getBranchName(branchId) {
-            return branchesData.find(branch => String(branch.id) === String(branchId))?.name || branchId;
+        function changeLocationQty(product, branchId, locationId, pieces, variantIndex = null) {
+            const delta = Number(pieces || 0);
+            if (String(locationId) === 'shop') {
+                changeBranchQty(product, branchId, delta, variantIndex);
+                return;
+            }
+            if (product.hasVariants && variantIndex !== null) {
+                const variant = product.variants?.[variantIndex];
+                if (!variant) return;
+                variant.storeStocks = variant.storeStocks && typeof variant.storeStocks === 'object' ? variant.storeStocks : {};
+                variant.storeStocks[locationId] = Math.max(0, Number(variant.storeStocks[locationId] || 0) + delta);
+            } else {
+                product.storeStocks = product.storeStocks && typeof product.storeStocks === 'object' ? product.storeStocks : {};
+                product.storeStocks[locationId] = Math.max(0, Number(product.storeStocks[locationId] || 0) + delta);
+            }
+        }
+
+        function markProductAvailableForBranch(product, branchId) {
+            const dataId = branchDataId(branchId);
+            product.branchCatalog = product.branchCatalog && typeof product.branchCatalog === 'object' ? product.branchCatalog : {};
+            product.branchCatalog[dataId] = true;
+            if (!product.ownerBranchId) product.ownerBranchId = dataId;
+        }
+
+        function refreshTransferDatasets() {
+            transferProductsData = readFullArrayDataset('cashtop_products');
+            transferStoresData = readFullArrayDataset('cashtop_stores');
         }
 
         function openTransferModal() {
+            sessionUser = window.Cashtop?.getSession?.() || sessionUser;
+            if (!canTransferInventory()) return showToast('لا تملك صلاحية نقل المخزون بين الفروع.', 'error');
+            refreshTransferDatasets();
             transferCart = [];
             renderTransferCart();
             document.getElementById('transferSearchInput').value = '';
+            document.getElementById('transferSuggestions').style.display = 'none';
+
             const sourceSelect = document.getElementById('transSourceBranch');
             const destinationSelect = document.getElementById('transDestBranch');
             sourceSelect.innerHTML = '<option value="" disabled selected>اختر الفرع المُصدِّر...</option>';
             destinationSelect.innerHTML = '<option value="" disabled selected>اختر الفرع المُستلِم...</option>';
 
-            branchesData.filter(branch => branch.status === 'نشط').forEach(branch => {
-                sourceSelect.innerHTML += `<option value="${branch.id}">${branch.name}${isMainBranch(branch.id) ? ' — الفرع الرئيسي (الأصلي)' : ''}</option>`;
-                destinationSelect.innerHTML += `<option value="${branch.id}">${branch.name}${isMainBranch(branch.id) ? ' — الفرع الرئيسي (الأصلي)' : ''}</option>`;
+            const activeBranches = branchesData.filter(branch => branch.status === 'نشط');
+            activeBranches.forEach(branch => {
+                const label = `${branch.name}${isMainBranch(branch.id) ? ' — الفرع الرئيسي' : ''}`;
+                sourceSelect.add(new Option(label, String(branch.id)));
+                destinationSelect.add(new Option(label, String(branch.id)));
             });
 
             sourceSelect.disabled = false;
-            if (!isCompanyAdmin() && currentBranchRecordId()) {
-                sourceSelect.value = currentBranchRecordId();
+            if (!isCompanyAdmin()) {
+                const ownBranch = currentBranchRecordId();
+                if (!ownBranch || !activeBranches.some(branch => String(branch.id) === String(ownBranch))) {
+                    return showToast('تعذر تحديد فرع الموظف/المدير الحالي.', 'error');
+                }
+                sourceSelect.value = String(ownBranch);
                 sourceSelect.disabled = true;
             }
+
             handleSourceBranchChange();
             openModal('transferModal');
         }
@@ -990,42 +1143,65 @@
             renderTransferCart();
             const input = document.getElementById('transferSearchInput');
             input.value = '';
+            document.getElementById('transferSuggestions').style.display = 'none';
             const sourceId = document.getElementById('transSourceBranch').value;
+            populateLocationSelect('transSourceLocation', sourceId, 'اختر المحل أو المخزن المصدر...');
+
             const destinationSelect = document.getElementById('transDestBranch');
-            [...destinationSelect.options].forEach(option => { option.disabled = Boolean(option.value && option.value === sourceId); });
-            if (destinationSelect.value === sourceId) destinationSelect.value = '';
-            setTimeout(() => input.focus(), 50);
+            [...destinationSelect.options].forEach(option => {
+                option.disabled = Boolean(option.value && String(option.value) === String(sourceId));
+            });
+            if (String(destinationSelect.value) === String(sourceId)) destinationSelect.value = '';
+            handleDestinationBranchChange();
+        }
+
+        function handleSourceLocationChange() {
+            transferCart = [];
+            renderTransferCart();
+            document.getElementById('transferSearchInput').value = '';
+            document.getElementById('transferSuggestions').style.display = 'none';
+            setTimeout(() => document.getElementById('transferSearchInput').focus(), 40);
+        }
+
+        function handleDestinationBranchChange() {
+            const destinationId = document.getElementById('transDestBranch').value;
+            populateLocationSelect('transDestLocation', destinationId, 'اختر المحل أو المخزن المستلم...');
         }
 
         function searchTransferProducts() {
             const value = document.getElementById('transferSearchInput').value.trim().toLowerCase();
             const box = document.getElementById('transferSuggestions');
             const sourceBranchId = document.getElementById('transSourceBranch').value;
-            if (!sourceBranchId) {
-                showToast('اختر الفرع المصدر أولاً', 'error');
+            const sourceLocationId = document.getElementById('transSourceLocation').value;
+            if (!sourceBranchId || !sourceLocationId) {
+                showToast('اختر الفرع والمخزن/المحل المصدر أولاً', 'error');
                 document.getElementById('transferSearchInput').value = '';
                 box.style.display = 'none';
                 return;
             }
             if (!value) { box.style.display = 'none'; return; }
 
+            // نقرأ النسخة الكاملة كل مرة لضمان ظهور منتج أضيف في فرع آخر مباشرة.
+            transferProductsData = readFullArrayDataset('cashtop_products');
             const matched = [];
-            productsData.forEach(product => {
+            transferProductsData.forEach(product => {
                 const name = String(product.name || '').toLowerCase();
                 const barcode = String(product.barcode || '').toLowerCase();
-                if (!name.includes(value) && !barcode.includes(value)) return;
+                const unitBarcode = String(product.unitBarcode || '').toLowerCase();
+                const variantBarcodeMatch = Array.isArray(product.variants) && product.variants.some(v => String(v?.barcode || '').toLowerCase().includes(value));
+                if (!name.includes(value) && !barcode.includes(value) && !unitBarcode.includes(value) && !variantBarcodeMatch) return;
                 if (product.hasVariants && Array.isArray(product.variants)) {
-                    const available = product.variants.some((variant, index) => getExactBranchQty(product, sourceBranchId, index) > 0);
-                    matched.push({ product, available });
+                    const available = product.variants.some((variant, index) => getLocationQty(product, sourceBranchId, sourceLocationId, index) > 0);
+                    if (available) matched.push({ product, available: true });
                 } else {
-                    const qty = getExactBranchQty(product, sourceBranchId);
-                    matched.push({ product, available: qty > 0, qty });
+                    const qty = getLocationQty(product, sourceBranchId, sourceLocationId);
+                    if (qty > 0) matched.push({ product, available: true, qty });
                 }
             });
 
             box.innerHTML = '';
             if (!matched.length) {
-                box.innerHTML = '<div style="padding:10px;color:#999;text-align:center;">لا توجد منتجات مطابقة</div>';
+                box.innerHTML = '<div style="padding:10px;color:#999;text-align:center;">لا توجد منتجات متوفرة في موقع المصدر المختار</div>';
                 box.style.display = 'block';
                 return;
             }
@@ -1035,13 +1211,12 @@
                 const row = document.createElement('div');
                 row.className = 'suggestion-item';
                 const statusText = product.hasVariants
-                    ? (match.available ? 'اختر لعرض المقاسات المتوفرة في الفرع' : 'لا يوجد رصيد من المقاسات في هذا الفرع')
-                    : `المتوفر في الفرع: ${match.qty || 0} ${product.pieceName || 'قطعة'}`;
-                row.innerHTML = `<span style="font-weight:bold;color:#333;">${product.name}${product.hasVariants ? ' <span class="badge-variant">متعدد المقاسات</span>' : ''}</span><br><span style="font-size:11px;color:${match.available ? '#00a65a' : '#dd4b39'};font-weight:bold;">${statusText}</span>`;
+                    ? 'اضغط لاختيار المقاسات/الألوان المتوفرة في هذا الموقع'
+                    : `المتوفر هنا: ${match.qty || 0} ${product.pieceName || 'قطعة'}`;
+                row.innerHTML = `<span style="font-weight:bold;color:#333;">${product.name}${product.hasVariants ? ' <span class="badge-variant">متعدد المقاسات</span>' : ''}</span><br><span style="font-size:11px;color:#00a65a;font-weight:bold;">${statusText}</span>`;
                 row.onmousedown = event => {
                     event.preventDefault();
-                    if (!match.available) showToast('لا يوجد رصيد من هذا المنتج في الفرع المصدر', 'error');
-                    else if (product.hasVariants) openTransferVariantModal(product.id, sourceBranchId);
+                    if (product.hasVariants) openTransferVariantModal(product.id, sourceBranchId, sourceLocationId);
                     else addProdToTransferCart(product, match.qty);
                     document.getElementById('transferSearchInput').value = '';
                     box.style.display = 'none';
@@ -1052,148 +1227,190 @@
         }
 
         function addProdToTransferCart(prod, availQty) {
-            const existing = transferCart.find(item => item.id === prod.id && !item.isVariant);
-            if(!existing) {
+            const existing = transferCart.find(item => String(item.id) === String(prod.id) && !item.isVariant);
+            if (!existing) {
                 transferCart.push({
-                    id: prod.id, name: prod.name, stockInSource: availQty,
-                    piecesPerUnit: prod.piecesPerUnit || 1, unitName: prod.unitName || 'وحدة', pieceName: prod.pieceName || 'قطعة',
+                    id: prod.id, name: prod.name, stockInSource: Number(availQty || 0),
+                    piecesPerUnit: Math.max(1, Number(prod.piecesPerUnit || 1)), unitName: prod.unitName || 'وحدة', pieceName: prod.pieceName || 'قطعة',
                     addType: prod.addType || 'piece', transferUnit: (prod.addType === 'unit' ? 'unit' : 'piece'), transferQty: 1, isVariant: false
                 });
                 renderTransferCart();
-            } else { showToast("المنتج موجود مسبقاً بالقائمة", "warning"); }
+            } else showToast('المنتج موجود مسبقاً بالقائمة', 'warning');
         }
 
-        function openTransferVariantModal(productId, sourceBranchId) {
-            const prod = productsData.find(p => p.id === productId);
-            if (!prod || !prod.variants) return;
+        function openTransferVariantModal(productId, sourceBranchId, sourceLocationId) {
+            const prod = transferProductsData.find(p => String(p.id) === String(productId));
+            if (!prod || !Array.isArray(prod.variants)) return;
             const tbody = document.getElementById('transferVariantBody');
             tbody.innerHTML = '';
-            
-            prod.variants.forEach((v, vIndex) => {
-                let availQty = getExactBranchQty(prod, sourceBranchId, vIndex);
-                if (availQty > 0) {
-                    tbody.innerHTML += `
-                        <tr style="cursor:pointer;" onmouseover="this.style.background='#f0f8ff'" onmouseout="this.style.background='transparent'" onclick="addVariantToTransfer('${prod.id}', ${vIndex}, ${availQty}); closeModal('transferVariantModal');">
-                            <td><span style="background:#f1f5f9; padding:2px 8px; border-radius:4px; font-weight:bold;">${v.size || '---'}</span></td>
-                            <td>${v.color || '---'}</td>
-                            <td style="color:#00a65a; font-weight:bold;">${availQty}</td>
-                        </tr>
-                    `;
-                }
+            let count = 0;
+            prod.variants.forEach((variant, vIndex) => {
+                const availQty = getLocationQty(prod, sourceBranchId, sourceLocationId, vIndex);
+                if (availQty <= 0) return;
+                count += 1;
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                tr.innerHTML = `<td><span style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-weight:bold;">${variant.size || '---'}</span></td><td>${variant.color || '---'}</td><td style="color:#00a65a;font-weight:bold;">${availQty}</td>`;
+                tr.onmouseenter = () => { tr.style.background = '#f0f8ff'; };
+                tr.onmouseleave = () => { tr.style.background = 'transparent'; };
+                tr.onclick = () => { addVariantToTransfer(prod.id, vIndex, availQty); closeModal('transferVariantModal'); };
+                tbody.appendChild(tr);
             });
+            if (!count) return showToast('لا توجد مقاسات متوفرة في موقع المصدر المختار', 'error');
             openModal('transferVariantModal');
         }
 
         function addVariantToTransfer(prodId, vIndex, availQty) {
-            const prod = productsData.find(p => p.id === prodId);
-            const variant = prod.variants[vIndex];
-            
-            const existing = transferCart.find(item => item.id === prod.id && item.isVariant && item.vIndex === vIndex);
-            if(!existing) {
+            const prod = transferProductsData.find(p => String(p.id) === String(prodId));
+            const variant = prod?.variants?.[vIndex];
+            if (!prod || !variant) return;
+            const existing = transferCart.find(item => String(item.id) === String(prod.id) && item.isVariant && item.vIndex === vIndex);
+            if (!existing) {
+                const piecesPerUnit = Math.max(1, Number(prod.piecesPerUnit || 1));
+                const addType = prod.addType || 'piece';
                 transferCart.push({
-                    id: prod.id, name: `${prod.name} (مقاس: ${variant.size} - لون: ${variant.color})`, stockInSource: availQty,
-                    piecesPerUnit: 1, unitName: 'وحدة', pieceName: 'قطعة', addType: 'piece', transferUnit: 'piece', transferQty: 1, isVariant: true, vIndex: vIndex
+                    id: prod.id,
+                    name: `${prod.name} (مقاس: ${variant.size || '-'} - لون: ${variant.color || '-'})`,
+                    stockInSource: Number(availQty || 0),
+                    piecesPerUnit,
+                    unitName: prod.unitName || 'وحدة',
+                    pieceName: prod.pieceName || 'قطعة',
+                    addType,
+                    transferUnit: addType === 'unit' ? 'unit' : 'piece',
+                    transferQty: 1,
+                    isVariant: true,
+                    vIndex
                 });
                 renderTransferCart();
-            } else { showToast("المقاس موجود مسبقاً بالجدول", "warning"); }
+            } else showToast('المقاس موجود مسبقاً بالجدول', 'warning');
         }
 
         function renderTransferCart() {
             const tbody = document.getElementById('transferCartBody');
             tbody.innerHTML = '';
-            
-            let cartHasItems = transferCart.length > 0;
-            if (isCompanyAdmin()) document.getElementById('transSourceBranch').disabled = cartHasItems;
+            const cartHasItems = transferCart.length > 0;
+            const sourceBranch = document.getElementById('transSourceBranch');
+            const sourceLocation = document.getElementById('transSourceLocation');
+            if (sourceBranch) sourceBranch.disabled = cartHasItems || !isCompanyAdmin();
+            if (sourceLocation) sourceLocation.disabled = cartHasItems;
 
-            if(!cartHasItems) {
-                tbody.innerHTML = `<tr><td colspan="4" style="color:#999; padding:15px; font-weight:bold;">عربة النقل فارغة. ابحث لإضافة المنتجات...</td></tr>`;
+            if (!cartHasItems) {
+                tbody.innerHTML = '<tr><td colspan="4" style="color:#999;padding:15px;font-weight:bold;">عربة النقل فارغة. اختر موقع المصدر وابحث عن المنتجات المتوفرة فيه...</td></tr>';
                 return;
             }
-            
+
             transferCart.forEach((item, index) => {
                 let unitAndQtyHtml = '';
-                if(item.addType === 'unit' && !item.isVariant) {
-                    let maxAllowedUnits = Math.floor(item.stockInSource / item.piecesPerUnit);
-                    let maxAllowedPieces = item.stockInSource;
-                    let currentMax = item.transferUnit === 'unit' ? maxAllowedUnits : maxAllowedPieces;
-
+                if (item.addType === 'unit' && Number(item.piecesPerUnit || 1) > 1) {
+                    const maxAllowedUnits = Math.floor(Number(item.stockInSource || 0) / Number(item.piecesPerUnit || 1));
+                    const maxAllowedPieces = Number(item.stockInSource || 0);
+                    const currentMax = item.transferUnit === 'unit' ? maxAllowedUnits : maxAllowedPieces;
                     unitAndQtyHtml = `
-                        <div style="display:flex; flex-direction:column; gap:5px; align-items:center;">
-                            <select class="form-control" style="padding:4px 8px; font-size:11px; height:28px; width:130px; border-color:#3b82f6;" onchange="updateTransferUnit(${index}, this.value)">
+                        <div style="display:flex;flex-direction:column;gap:5px;align-items:center;">
+                            <select class="form-control" style="padding:4px 8px;font-size:11px;height:28px;width:140px;border-color:#3b82f6;" onchange="updateTransferUnit(${index}, this.value)">
                                 <option value="unit" ${item.transferUnit === 'unit' ? 'selected' : ''}>كرتونة (${item.piecesPerUnit} ${item.pieceName})</option>
-                                <option value="piece" ${item.transferUnit === 'piece' ? 'selected' : ''}>حبة / ${item.pieceName}</option>
+                                <option value="piece" ${item.transferUnit === 'piece' ? 'selected' : ''}>قطعة / ${item.pieceName}</option>
                             </select>
-                            <input type="number" class="form-control" value="${item.transferQty}" min="1" max="${currentMax}" onchange="updateTransferQty(${index}, this.value)" style="width:130px; padding:4px; text-align:center; height:28px; font-weight:bold;" placeholder="أدخل الكمية">
-                        </div>
-                    `;
+                            <input type="number" class="form-control" value="${item.transferQty}" min="1" max="${Math.max(0, currentMax)}" onchange="updateTransferQty(${index}, this.value)" style="width:140px;padding:4px;text-align:center;height:28px;font-weight:bold;" placeholder="أدخل الكمية">
+                        </div>`;
                 } else {
-                    let unitOptions = `<span style="background:#f1f5f9; padding:4px 8px; border-radius:4px; margin-bottom:5px; display:inline-block;">بالـ ${item.pieceName}</span>`;
                     unitAndQtyHtml = `
-                        <div style="display:flex; flex-direction:column; gap:5px; align-items:center;">
-                            ${unitOptions}
-                            <input type="number" class="form-control" value="${item.transferQty}" min="1" max="${item.stockInSource}" onchange="updateTransferQty(${index}, this.value)" style="width:90px; padding:4px; text-align:center; height:28px; font-weight:bold;">
-                        </div>
-                    `;
+                        <div style="display:flex;flex-direction:column;gap:5px;align-items:center;">
+                            <span style="background:#f1f5f9;padding:4px 8px;border-radius:4px;margin-bottom:5px;display:inline-block;">بالـ ${item.pieceName}</span>
+                            <input type="number" class="form-control" value="${item.transferQty}" min="1" max="${item.stockInSource}" onchange="updateTransferQty(${index}, this.value)" style="width:100px;padding:4px;text-align:center;height:28px;font-weight:bold;">
+                        </div>`;
                 }
-
                 tbody.innerHTML += `
                     <tr>
-                        <td style="font-weight:bold; font-size:13px; color:#222;">${item.name}</td>
-                        <td style="vertical-align: middle;">${unitAndQtyHtml}</td>
-                        <td style="color:#00a65a; font-weight:bold; font-size:14px; vertical-align: middle;">${item.stockInSource} <span style="font-size:10px; color:#888;">${item.pieceName}</span></td>
-                        <td style="vertical-align: middle;"><button type="button" class="action-btn-clean btn-clean-delete" onclick="removeTransferItem(${index})"><i class="fa-solid fa-trash-can"></i></button></td>
-                    </tr>
-                `;
+                        <td style="font-weight:bold;font-size:13px;color:#222;">${item.name}</td>
+                        <td style="vertical-align:middle;">${unitAndQtyHtml}</td>
+                        <td style="color:#00a65a;font-weight:bold;font-size:14px;vertical-align:middle;">${item.stockInSource} <span style="font-size:10px;color:#888;">${item.pieceName}</span></td>
+                        <td style="vertical-align:middle;"><button type="button" class="action-btn-clean btn-clean-delete" onclick="removeTransferItem(${index})"><i class="fa-solid fa-trash-can"></i></button></td>
+                    </tr>`;
             });
         }
 
-        function updateTransferUnit(index, val) { transferCart[index].transferUnit = val; transferCart[index].transferQty = 1; renderTransferCart(); }
-        function updateTransferQty(index, val) { transferCart[index].transferQty = parseInt(val) || 1; }
+        function updateTransferUnit(index, val) {
+            if (!transferCart[index]) return;
+            transferCart[index].transferUnit = val;
+            transferCart[index].transferQty = 1;
+            renderTransferCart();
+        }
+        function updateTransferQty(index, val) { if (transferCart[index]) transferCart[index].transferQty = Math.max(1, parseInt(val, 10) || 1); }
         function removeTransferItem(index) { transferCart.splice(index, 1); renderTransferCart(); }
 
         function processTransfer() {
+            sessionUser = window.Cashtop?.getSession?.() || sessionUser;
+            if (!canTransferInventory()) return showToast('لا تملك صلاحية تنفيذ النقل.', 'error');
+
             const sourceBranchId = document.getElementById('transSourceBranch').value;
+            const sourceLocationId = document.getElementById('transSourceLocation').value;
             const destinationBranchId = document.getElementById('transDestBranch').value;
-            if (!sourceBranchId || !destinationBranchId) return showToast('اختر الفرع المصدر والفرع المستلم', 'error');
-            if (sourceBranchId === destinationBranchId) return showToast('لا يمكن النقل إلى نفس الفرع', 'error');
+            const destinationLocationId = document.getElementById('transDestLocation').value;
+            if (!sourceBranchId || !sourceLocationId || !destinationBranchId || !destinationLocationId) return showToast('اختر الفرع والمخزن/المحل للمصدر والوجهة', 'error');
+            if (String(sourceBranchId) === String(destinationBranchId)) return showToast('النقل بين الفروع يجب أن يكون إلى فرع آخر. للنقل داخل نفس الفرع استخدم صفحة المخازن.', 'error');
+            if (!isCompanyAdmin() && String(sourceBranchId) !== String(currentBranchRecordId())) return showToast('الموظف أو مدير الفرع يستطيع النقل من فرعه فقط.', 'error');
+            if (!locationBelongsToBranch(sourceBranchId, sourceLocationId) || !locationBelongsToBranch(destinationBranchId, destinationLocationId)) return showToast('المخزن المحدد لا يتبع الفرع المختار.', 'error');
             if (!transferCart.length) return showToast('عربة النقل فارغة', 'error');
 
+            // إعادة القراءة قبل التنفيذ تمنع الخصم من رصيد قديم إذا تغير المخزون من جهاز آخر.
+            const fullProducts = readFullArrayDataset('cashtop_products');
+            const prepared = [];
             for (const item of transferCart) {
-                const pieces = item.transferUnit === 'unit' ? item.transferQty * item.piecesPerUnit : item.transferQty;
-                if (pieces > item.stockInSource) return showToast(`الكمية المطلوبة للصنف [${item.name}] تتجاوز رصيد الفرع المصدر`, 'error');
+                const product = fullProducts.find(productItem => String(productItem.id) === String(item.id));
+                if (!product) return showToast(`تعذر العثور على المنتج [${item.name}]`, 'error');
+                const qty = Math.max(1, Number(item.transferQty || 0));
+                const piecesPerUnit = Math.max(1, Number(item.piecesPerUnit || 1));
+                const pieces = item.transferUnit === 'unit' ? qty * piecesPerUnit : qty;
+                const availableNow = getLocationQty(product, sourceBranchId, sourceLocationId, item.isVariant ? item.vIndex : null);
+                if (!Number.isFinite(pieces) || pieces <= 0) return showToast(`أدخل كمية صحيحة للصنف [${item.name}]`, 'error');
+                if (pieces > availableNow + 1e-9) return showToast(`الكمية المطلوبة للصنف [${item.name}] تتجاوز المتوفر حالياً في المصدر (${availableNow})`, 'error');
+                prepared.push({ item, product, pieces });
             }
 
-            transferCart.forEach(item => {
-                const product = productsData.find(productItem => String(productItem.id) === String(item.id));
-                if (!product) return;
-                const pieces = item.transferUnit === 'unit' ? item.transferQty * item.piecesPerUnit : item.transferQty;
-                if (item.isVariant) {
-                    changeBranchQty(product, sourceBranchId, -pieces, item.vIndex);
-                    changeBranchQty(product, destinationBranchId, pieces, item.vIndex);
-                } else {
-                    changeBranchQty(product, sourceBranchId, -pieces);
-                    changeBranchQty(product, destinationBranchId, pieces);
-                }
-            });
+            try {
+                prepared.forEach(({ item, product, pieces }) => {
+                    const variantIndex = item.isVariant ? item.vIndex : null;
+                    changeLocationQty(product, sourceBranchId, sourceLocationId, -pieces, variantIndex);
+                    changeLocationQty(product, destinationBranchId, destinationLocationId, pieces, variantIndex);
+                    markProductAvailableForBranch(product, destinationBranchId);
+                    product.updatedAt = new Date().toISOString();
+                });
 
-            const historyRecord = {
-                id: `TR_BR_${Date.now()}`,
-                date: new Date().toLocaleString('ar-EG'),
-                sourceBranchId,
-                destinationBranchId,
-                fromStore: getBranchName(sourceBranchId),
-                toStore: getBranchName(destinationBranchId),
-                items: transferCart.map(item => {
-                    const unit = item.transferUnit === 'unit' ? `كرتونة (${item.piecesPerUnit} ${item.pieceName})` : item.pieceName;
-                    return `${item.name} | الكمية: ${item.transferQty} ${unit}`;
-                }),
-                user: sessionUser.username || sessionUser.displayName || ''
-            };
-            branchTransferHistoryData.unshift(historyRecord);
-            localStorage.setItem('cashtop_branch_transfer_history', JSON.stringify(branchTransferHistoryData));
-            localStorage.setItem('cashtop_products', JSON.stringify(productsData));
-            showToast('تم النقل بين الفرعين وتحديث أرصدة الفروع بنجاح', 'success');
-            closeModal('transferModal');
+                saveFullCompanyDataset('cashtop_products', fullProducts);
+                transferProductsData = fullProducts;
+
+                const historyRecord = {
+                    id: `TR_BR_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                    date: new Date().toLocaleString('ar-EG'),
+                    createdAt: new Date().toISOString(),
+                    sourceBranchId,
+                    sourceLocationId,
+                    destinationBranchId,
+                    destinationLocationId,
+                    sourceBranchName: getBranchName(sourceBranchId),
+                    destinationBranchName: getBranchName(destinationBranchId),
+                    sourceLocationName: getLocationName(sourceBranchId, sourceLocationId),
+                    destinationLocationName: getLocationName(destinationBranchId, destinationLocationId),
+                    fromStore: getLocationName(sourceBranchId, sourceLocationId),
+                    toStore: getLocationName(destinationBranchId, destinationLocationId),
+                    items: transferCart.map(item => {
+                        const unit = item.transferUnit === 'unit' ? `كرتونة (${item.piecesPerUnit} ${item.pieceName})` : item.pieceName;
+                        return `${item.name} | الكمية: ${item.transferQty} ${unit}`;
+                    }),
+                    user: sessionUser.username || sessionUser.displayName || '',
+                    userId: sessionUser.uid || '',
+                    role: sessionUser.role || ''
+                };
+                branchTransferHistoryData.unshift(historyRecord);
+                localStorage.setItem('cashtop_branch_transfer_history', JSON.stringify(branchTransferHistoryData));
+                showToast('تم خصم الكمية من موقع المصدر وإضافتها إلى موقع الوجهة وتسجيل حركة النقل بنجاح', 'success');
+                closeModal('transferModal');
+                initSystem();
+            } catch (error) {
+                console.error('cross-branch transfer:', error);
+                showToast(error?.message || 'تعذر تنفيذ النقل ولم يتم اعتماد الحركة.', 'error');
+            }
         }
 
         // ==========================================
@@ -1258,7 +1475,7 @@
             XLSX.writeFile(wb, `سجل_حركات_النقل_للفروع_${Date.now()}.xlsx`);
         }
 
-        function exportHistoryPdf() {
+        async function exportHistoryPdf() {
             let displayData = branchTransferHistoryData;
             if (!isCompanyAdmin()) {
                 displayData = branchTransferHistoryData.filter(record =>
@@ -1267,29 +1484,19 @@
                     record.fromStore === sessionUser.branchName || record.toStore === sessionUser.branchName
                 );
             }
-
             if (displayData.length === 0) { showToast("لا توجد بيانات لتصديرها!", "error"); return; }
-            showToast("جاري توليد ملف الـ PDF...", "success");
-
-            let thead = `<tr style="background-color: #f1f5f9; color: #333;"><th style="border: 1px solid #ddd; padding: 10px;">التاريخ</th><th style="border: 1px solid #ddd; padding: 10px;">المصدر</th><th style="border: 1px solid #ddd; padding: 10px;">الوجهة</th><th style="border: 1px solid #ddd; padding: 10px;">المنتجات والكميات</th></tr>`;
-            let tbody = '';
-            displayData.forEach(r => {
-                tbody += `<tr><td style="border: 1px solid #ddd; padding: 10px; direction: ltr;">${r.date}</td><td style="border: 1px solid #ddd; padding: 10px; color:#dd4b39; font-weight:bold;">${r.fromStore}</td><td style="border: 1px solid #ddd; padding: 10px; color:#00a65a; font-weight:bold;">${r.toStore}</td><td style="border: 1px solid #ddd; padding: 10px; text-align:right;">${r.items.join('<br>')}</td></tr>`;
-            });
-
-            document.getElementById('pdfHistoryTable').innerHTML = `<thead>${thead}</thead><tbody>${tbody}</tbody>`;
-            document.getElementById('pdfHistoryDate').innerText = `تاريخ التصدير: ${new Date().toLocaleString('ar-EG')}`;
-
-            const element = document.getElementById('pdfHistoryContainer');
-            html2canvas(element, { scale: 2, useCORS: true }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`سجل_حركات_نقل_الفروع_${Date.now()}.pdf`);
-            });
+            showToast("جاري إنشاء سجل النقل كجدول PDF...", "success");
+            const rows = displayData.map(r => [r.date || '-', r.fromStore || '-', r.toStore || '-', Array.isArray(r.items) ? r.items.join(' | ') : (r.items || '-')]);
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: 'سجل حركات نقل الفروع',
+                    subtitle: `تاريخ التصدير: ${new Date().toLocaleString('en-GB')}`,
+                    columns: ['التاريخ', 'المصدر', 'الوجهة', 'المنتجات والكميات'],
+                    rows,
+                    filename: `سجل_حركات_نقل_الفروع_${Date.now()}.pdf`,
+                    orientation: 'landscape'
+                });
+            } catch (err) { console.error(err); showToast('تعذر إنشاء ملف PDF.', 'error'); }
         }
 
         window.addEventListener('load', initSystem);
@@ -1313,6 +1520,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"branches.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

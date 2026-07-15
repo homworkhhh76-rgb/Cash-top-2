@@ -14,7 +14,12 @@
   const rawSet = (key, value) => Storage.prototype.setItem.call(localStorage, key, String(value));
   const rawRemove = key => Storage.prototype.removeItem.call(localStorage, key);
   const rawKey = index => Storage.prototype.key.call(localStorage, index);
+  const TAB_SESSION_KEY = 'cashtop_tab_session_v2';
   const parse = (value, fallback) => { try { return JSON.parse(value) ?? fallback; } catch (_) { return fallback; } };
+  function writeSession(session) {
+    rawSet('cashtop_session', JSON.stringify(session));
+    try { sessionStorage.setItem(TAB_SESSION_KEY, JSON.stringify(session)); } catch (_) {}
+  }
 
   function decodeJsonValue(value, fallback = null) {
     let parsed = value;
@@ -48,8 +53,15 @@
   function normalizeKey(value) { return String(value || '').trim().toUpperCase(); }
   function normalizeUsername(value) { return String(value || '').trim().toLowerCase(); }
   function sanitizeSegment(value) { return String(value || '').trim().replace(/[.#$\[\]\/]/g, '_'); }
-  function namespaceKey(companyId, key) { return `cashtop_data::${encodeURIComponent(companyId)}::${key}`; }
-  function metaKey(companyId, key) { return `cashtop_meta::${encodeURIComponent(companyId)}::${key}`; }
+  function namespaceKey(tenantId, key) { return `cashtop_data::${encodeURIComponent(tenantId)}::${key}`; }
+  function metaKey(tenantId, key) { return `cashtop_meta::${encodeURIComponent(tenantId)}::${key}`; }
+  function getTenantBindings() { return parse(rawGet('cashtop_tenant_bindings'), {}) || {}; }
+  function setTenantBinding(companyKey, tenantId) {
+    const key = normalizeKey(companyKey); const tenant = String(tenantId || '').trim();
+    if (!key || !tenant) return;
+    const bindings = getTenantBindings(); bindings[key] = tenant;
+    rawSet('cashtop_tenant_bindings', JSON.stringify(bindings));
+  }
 
   function datasetValue(companyNode, key, fallback) {
     const payload = companyNode?.datasets?.[key];
@@ -107,25 +119,34 @@
   }
 
   function findCompanyAccessByKey(companyKey) {
+    const boundTenant = String(getTenantBindings()[companyKey] || '').trim();
+    const matches = [];
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = rawKey(i);
       if (!key || !key.endsWith('::cashtop_company_access')) continue;
       const access = decodeJsonValue(rawGet(key), null);
-      if (access && normalizeKey(access.companyKey) === companyKey) return access;
+      if (!access || normalizeKey(access.companyKey) !== companyKey) continue;
+      const tenantId = String(access.tenantId || access.companyId || '');
+      if (boundTenant && tenantId !== boundTenant) continue;
+      matches.push(access);
     }
-    return null;
+    if (boundTenant) return matches.find(access => String(access.tenantId || access.companyId || '') === boundTenant) || null;
+    return matches.length === 1 ? matches[0] : null;
   }
 
   function resolveLocalContext(companyKey) {
     const licenses = normalizeArray(rawGet('cashtop_admin_licenses'));
     const users = normalizeArray(rawGet('cashtop_admin_users'));
-    let license = licenses.find(item => normalizeKey(item.key) === companyKey) || null;
+    const boundTenant = String(getTenantBindings()[companyKey] || '').trim();
+    let license = licenses.find(item => normalizeKey(item.key) === companyKey && (!boundTenant || String(item.tenantId || item.companyId || item.id) === boundTenant)) || null;
     const accessFromScan = findCompanyAccessByKey(companyKey);
     if (!license && accessFromScan) {
+      const tenantId = String(accessFromScan.tenantId || accessFromScan.companyId || sanitizeSegment(companyKey));
       license = {
-        id: accessFromScan.licenseId || accessFromScan.companyId || companyKey,
+        id: accessFromScan.licenseId || tenantId,
         key: companyKey,
-        companyId: accessFromScan.companyId || sanitizeSegment(companyKey),
+        tenantId,
+        companyId: tenantId,
         companyName: accessFromScan.companyName || 'الشركة',
         status: accessFromScan.status || 'active',
         plan: accessFromScan.plan || 'pro',
@@ -135,13 +156,20 @@
       };
       licenses.push(license);
       rawSet('cashtop_admin_licenses', JSON.stringify(licenses));
+      setTenantBinding(companyKey, tenantId);
     }
     if (!license) return { license: null, users, access: accessFromScan, branches: [], employees: [] };
-    const companyId = license.companyId || license.id;
-    const access = decodeJsonValue(rawGet(namespaceKey(companyId, 'cashtop_company_access')), accessFromScan || {});
-    const branches = normalizeArray(rawGet(namespaceKey(companyId, 'cashtop_branches')));
-    const employees = normalizeArray(rawGet(namespaceKey(companyId, 'cashtop_employees')));
-    return { license, users, access, branches, employees, companyId };
+    const tenantId = String(boundTenant || license.tenantId || license.companyId || license.id);
+    const access = decodeJsonValue(rawGet(namespaceKey(tenantId, 'cashtop_company_access')), accessFromScan || {});
+    if (access && Object.keys(access).length) {
+      const accessTenant = String(access.tenantId || access.companyId || tenantId);
+      if (accessTenant !== tenantId || (access.companyKey && normalizeKey(access.companyKey) !== companyKey)) {
+        return { license: null, users: [], access: null, branches: [], employees: [], tenantMismatch: true };
+      }
+    }
+    const branches = normalizeArray(rawGet(namespaceKey(tenantId, 'cashtop_branches')));
+    const employees = normalizeArray(rawGet(namespaceKey(tenantId, 'cashtop_employees')));
+    return { license, users, access, branches, employees, companyId: tenantId, tenantId };
   }
 
   function authenticateContext(context, companyKey, username, password) {
@@ -156,7 +184,12 @@
     const uname = normalizeUsername(username);
     let account = null;
 
-    const legacy = context.users.find(item => normalizeKey(item.companyKey) === companyKey && normalizeUsername(item.username) === uname);
+    const contextTenant = String(context.tenantId || context.companyId || context.license?.tenantId || context.license?.companyId || '');
+    const legacy = context.users.find(item =>
+      normalizeKey(item.companyKey) === companyKey &&
+      normalizeUsername(item.username) === uname &&
+      (!contextTenant || String(item.tenantId || item.companyId || '') === contextTenant)
+    );
     if (legacy) account = { ...legacy, role: legacy.role || 'admin' };
 
     const manager = context.access?.manager;
@@ -204,22 +237,24 @@
 
   function saveSession(context, account, companyKey, remember) {
     const license = context.license || context.access;
-    const companyId = context.companyId || license.companyId || license.id || sanitizeSegment(companyKey);
+    const tenantId = String(context.tenantId || context.companyId || license.tenantId || license.companyId || license.id || sanitizeSegment(companyKey));
     const session = {
       mode: 'local', uid: account.id, username: account.username, displayName: account.displayName || account.username,
       role: account.role || 'user', permissions: account.permissions || {}, branchRecordId: account.branchRecordId || null, branchId: account.branchId || (['admin','owner','company-admin'].includes(String(account.role||'').toLowerCase()) ? 'MAIN' : null), dataBranchId: account.dataBranchId || account.branchId || (['admin','owner','company-admin'].includes(String(account.role||'').toLowerCase()) ? 'MAIN' : null),
-      branchName: account.branchName || '', companyKey, companyId,
+      branchName: account.branchName || '', companyKey, tenantId, companyId: tenantId,
       companyName: license.companyName || context.access?.companyName || 'الشركة',
-      licenseId: license.id || license.licenseId || companyId, licenseStart: license.startAt || '', licenseEnd: license.endAt || '',
+      licenseId: license.id || license.licenseId || tenantId, licenseStart: license.startAt || '', licenseEnd: license.endAt || '',
       plan: license.plan || context.access?.plan || 'pro', status: license.status || 'active', loginAt: new Date().toISOString(), lastLicenseCheck: Date.now()
     };
-    rawSet('cashtop_session', JSON.stringify(session));
+    writeSession(session);
+    setTenantBinding(companyKey, tenantId);
     saveRemembered(companyKey, account.username, remember);
     return session;
   }
 
   async function localLogin(key, username, password, remember) {
     const context = resolveLocalContext(key);
+    if (context.tenantMismatch) throw new Error('تم منع فتح بيانات شركة أخرى لهذا المفتاح. أعد المزامنة من لوحة الإدارة.');
     if (!context.license && !context.access) throw new Error('مفتاح الشركة غير موجود محلياً.');
     const account = authenticateContext(context, key, username, password);
     saveSession(context, account, key, remember);
@@ -265,44 +300,71 @@
     if (!base) return null;
     try {
       const entry = await fetchJson(`${base}/${adminRoot}/keyIndex/${adminKeySegment(companyKey)}.json`, 12000);
-      const companyId = typeof entry === 'string' ? entry : entry?.companyId;
-      if (!companyId) return null;
-      const company = await fetchJson(`${base}/${settings.rootPath || 'cashTopExchange/cashTopPOS'}/${sanitizeSegment(companyId)}.json`, 18000);
+      const tenantId = typeof entry === 'string' ? entry : (entry?.tenantId || entry?.companyId);
+      if (!tenantId) return null;
+      const canonicalTenant = sanitizeSegment(tenantId);
+      const company = await fetchJson(`${base}/${settings.rootPath || 'cashTopExchange/cashTopPOS'}/${canonicalTenant}.json`, 18000);
       if (!company || typeof company !== 'object') return null;
       const access = datasetValue(company, 'cashtop_company_access', {}) || {};
-      return { root: settings.rootPath || 'cashTopExchange/cashTopPOS', companyId: sanitizeSegment(companyId), node: company, access };
-    } catch (error) { console.warn('[CASH TOP LOGIN] admin index lookup:', error); return null; }
+      const meta = company.meta || {};
+      const remoteKey = normalizeKey(access.companyKey || meta.companyKey || '');
+      const remoteTenant = sanitizeSegment(access.tenantId || access.companyId || meta.tenantId || meta.companyId || canonicalTenant);
+      if (remoteKey !== companyKey || remoteTenant !== canonicalTenant) {
+        const mismatch = new Error('فهرس المفتاح يشير إلى شركة أخرى. تم إيقاف الدخول لحماية البيانات.');
+        mismatch.code = 'CASHTOP_TENANT_INDEX_MISMATCH';
+        throw mismatch;
+      }
+      return { root: settings.rootPath || 'cashTopExchange/cashTopPOS', companyId: canonicalTenant, tenantId: canonicalTenant, node: company, access };
+    } catch (error) {
+      if (error?.code === 'CASHTOP_TENANT_INDEX_MISMATCH') throw error;
+      console.warn('[CASH TOP LOGIN] admin index lookup:', error); return null;
+    }
   }
 
   async function findRemoteCompany(companyKey) {
     const indexed = await findRemoteCompanyViaAdminIndex(companyKey);
     if (indexed) return indexed;
+
+    // لا نفحص جذر قاعدة البيانات كاملاً ولا نختار شركة بالتخمين. عند غياب
+    // فهرس الإدارة نسمح فقط بمسار محلي معروف مسبقاً لنفس المفتاح (ترحيل قديم).
     const settings = window.CASHTOP_FIREBASE || {};
     const cfg = settings.config || {};
     const base = String(cfg.databaseURL || '').replace(/\/+$/, '');
-    if (!base) return null;
+    const boundTenant = sanitizeSegment(getTenantBindings()[companyKey] || '');
+    if (!base || !boundTenant) return null;
     const roots = [...new Set([settings.rootPath || 'cashTopExchange/cashTopPOS', ...(settings.legacyRootPaths || [])])]
       .map(root => String(root || '').replace(/^\/+|\/+$/g, '')).filter(Boolean);
-
+    const matches = [];
     for (const root of roots) {
-      let collection;
-      try { collection = await fetchJson(`${base}/${root}.json`); }
-      catch (error) { console.warn('[CASH TOP LOGIN] Firebase root:', root, error); continue; }
-      if (!collection || typeof collection !== 'object') continue;
-      for (const [companyId, node] of Object.entries(collection)) {
-        if (!node || typeof node !== 'object') continue;
-        const access = datasetValue(node, 'cashtop_company_access', {}) || {};
-        const remoteKey = normalizeKey(access.companyKey || node.meta?.companyKey || '');
-        if (remoteKey === companyKey || normalizeKey(companyId) === companyKey || sanitizeSegment(companyKey) === companyId) {
-          return { root, companyId, node, access };
-        }
-      }
+      let node;
+      try { node = await fetchJson(`${base}/${root}/${boundTenant}.json`); }
+      catch (error) { console.warn('[CASH TOP LOGIN] Firebase tenant path:', root, error); continue; }
+      if (!node || typeof node !== 'object') continue;
+      const access = datasetValue(node, 'cashtop_company_access', {}) || {};
+      const remoteKey = normalizeKey(access.companyKey || node.meta?.companyKey || '');
+      const tenantId = sanitizeSegment(access.tenantId || access.companyId || node.meta?.tenantId || node.meta?.companyId || boundTenant);
+      if (remoteKey !== companyKey || tenantId !== boundTenant) continue;
+      matches.push({ root, companyId: tenantId, tenantId, node, access });
     }
-    return null;
+    if (matches.length > 1) {
+      const mismatch = new Error('تم العثور على أكثر من مسار لنفس الشركة. تم إيقاف الدخول لمنع خلط البيانات.');
+      mismatch.code = 'CASHTOP_TENANT_MISMATCH';
+      throw mismatch;
+    }
+    return matches[0] || null;
   }
 
   function hydrateRemoteCompany(remote, companyKey) {
-    const companyId = String(remote.access?.companyId || remote.node?.meta?.companyId || remote.companyId || sanitizeSegment(companyKey));
+    const tenantId = String(remote.access?.tenantId || remote.access?.companyId || remote.node?.meta?.tenantId || remote.node?.meta?.companyId || remote.tenantId || remote.companyId || '');
+    const canonicalTenant = sanitizeSegment(tenantId);
+    const remoteKey = normalizeKey(remote.access?.companyKey || remote.node?.meta?.companyKey || '');
+    if (!canonicalTenant || remoteKey !== companyKey || canonicalTenant !== sanitizeSegment(remote.companyId || canonicalTenant)) {
+      const mismatch = new Error('بيانات Firebase لا تطابق المفتاح الحالي. تم إيقاف الاستيراد لحماية بيانات الشركات.');
+      mismatch.code = 'CASHTOP_TENANT_MISMATCH';
+      throw mismatch;
+    }
+    const companyId = canonicalTenant;
+    setTenantBinding(companyKey, companyId);
     const datasets = remote.node?.datasets || {};
     Object.entries(datasets).forEach(([key, payload]) => {
       const value = datasetValue(remote.node, key, null);
@@ -321,9 +383,9 @@
     });
 
     const access = remote.access || {};
-    const licenses = normalizeArray(rawGet('cashtop_admin_licenses'));
+    let licenses = normalizeArray(rawGet('cashtop_admin_licenses')).filter(item => normalizeKey(item.key) !== companyKey || String(item.tenantId || item.companyId || item.id) === companyId);
     const license = {
-      id: access.licenseId || companyId, key: companyKey, companyId,
+      id: access.licenseId || companyId, key: companyKey, tenantId: companyId, companyId,
       companyName: access.companyName || remote.node?.meta?.companyName || 'الشركة',
       status: access.status || 'active', plan: access.plan || 'pro', backupImportEnabled: access.backupImportEnabled === true, startAt: access.startAt || '', endAt: access.endAt || '', authVersion: access.authVersion || access.updatedAt || 0
     };
@@ -332,9 +394,9 @@
     rawSet('cashtop_admin_licenses', JSON.stringify(licenses));
 
     if (access.manager?.username) {
-      const users = normalizeArray(rawGet('cashtop_admin_users'));
+      const users = normalizeArray(rawGet('cashtop_admin_users')).filter(item => normalizeKey(item.companyKey) !== companyKey || String(item.tenantId || item.companyId || '') === companyId);
       const user = {
-        id: access.manager.id || `ADMIN_${companyId}`, companyKey, companyId,
+        id: access.manager.id || `ADMIN_${companyId}`, companyKey, tenantId: companyId, companyId,
         username: access.manager.username, password: access.manager.password,
         displayName: access.manager.displayName || access.manager.username,
         role: 'admin', active: access.manager.active !== false
@@ -384,12 +446,13 @@
       mode: 'firebase', uid: credential.user.uid, username: profile.username || username,
       displayName: profile.displayName || profile.username || username, role: profile.role || 'user',
       permissions: profile.permissions || {}, branchId: profile.branchId || null,
-      companyKey: key, companyId: profile.companyId || license.companyId,
+      companyKey: key, tenantId: profile.tenantId || profile.companyId || license.tenantId || license.companyId,
+      companyId: profile.tenantId || profile.companyId || license.tenantId || license.companyId,
       companyName: profile.companyName || license.companyName, licenseId: license.id || key,
       licenseEnd: license.endAt, plan: license.plan || 'pro', backupImportEnabled: license.backupImportEnabled === true,
       status: license.status, loginAt: new Date().toISOString(), lastLicenseCheck: Date.now()
     };
-    rawSet('cashtop_session', JSON.stringify(session)); saveRemembered(key, username, remember);
+    writeSession(session); setTenantBinding(key, session.tenantId || session.companyId); saveRemembered(key, username, remember);
   }
 
   async function handleLogin(event) {
@@ -408,7 +471,10 @@
       // عند توفر الإنترنت تكون بيانات Firebase هي المصدر المرجعي للخطة والحالة.
       if (navigator.onLine && window.CASHTOP_FIREBASE?.enabled) {
         try { await databaseLogin(key, username, password, remember); authenticated = true; }
-        catch (error) { remoteError = error; }
+        catch (error) {
+          remoteError = error;
+          if (['CASHTOP_TENANT_INDEX_MISMATCH','CASHTOP_TENANT_MISMATCH'].includes(String(error?.code || ''))) throw error;
+        }
       }
       if (!authenticated) {
         try { await localLogin(key, username, password, remember); authenticated = true; }
@@ -438,7 +504,8 @@
       expired: 'انتهت مدة مفتاح الشركة، وتم تسجيل خروجك تلقائياً.', stopped: 'تم إيقاف مفتاح الشركة، وتم تسجيل خروجك تلقائياً.',
       deleted: 'تم حذف مفتاح الشركة أو لم يعد متاحاً.', 'user-disabled': 'تم تعطيل حساب المستخدم أو الفرع.',
       'auth-required': 'انتهت جلسة تسجيل الدخول. سجل الدخول مرة أخرى.', 'device-limit': 'تم الوصول إلى الحد الأقصى للأجهزة المسموح بها لهذا المفتاح.',
-      'permission-denied': 'لا يملك هذا الحساب صلاحية لفتح أي قسم. راجع مدير النظام.'
+      'permission-denied': 'لا يملك هذا الحساب صلاحية لفتح أي قسم. راجع مدير النظام.',
+      'tenant-mismatch': 'تم منع فتح مسار بيانات لا يخص هذا المفتاح لحماية بيانات الشركات.'
     };
     if (reason && messages[reason]) showStatus(messages[reason], 'warning');
   }
@@ -446,7 +513,7 @@
   cleanupLegacyDemo();
   window.handleLogin = handleLogin;
   window.addEventListener('DOMContentLoaded', () => {
-    const existingSession = parse(rawGet('cashtop_session'), null);
+    const existingSession = parse((()=>{try{return sessionStorage.getItem(TAB_SESSION_KEY)}catch(_){return null}})(), null) || parse(rawGet('cashtop_session'), null);
     const existingEnd = existingSession?.licenseEnd ? new Date(existingSession.licenseEnd).getTime() : 0;
     if (existingSession && existingSession.status !== 'stopped' && (!existingEnd || existingEnd > Date.now()) && !new URLSearchParams(location.search).get('reason')) {
       location.replace('لوحة التحكم.html'); return;

@@ -28,13 +28,12 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
    * كانت بياناتها نفسها تثبت أنها تخص المفتاح الحالي.
    */
   const canonicalCompanyId = sanitizeSegment(
-    session.companyId || session.licenseId || session.companyKey || 'unassigned'
+    session.tenantId || session.companyId || session.licenseId || session.companyKey || 'unassigned'
   ) || 'unassigned';
   const normalizedCompanyKey = String(session.companyKey || '').trim().toUpperCase();
-  const legacyCompanyIds = [...new Set([
-    sanitizeSegment(session.companyKey),
-    sanitizeSegment(session.licenseId)
-  ].filter(value => value && value !== canonicalCompanyId))];
+  // لا نزامن أبداً إلى عقدة تحمل معرفاً مختلفاً عن tenantId الحالي.
+  // الجذور القديمة مسموحة فقط إذا كان اسم عقدة الشركة نفسه هو tenantId الثابت.
+  const legacyCompanyIds = [];
   const companyIds = [canonicalCompanyId];
 
   const stateKey = `${STATE_KEY_PREFIX}::${encodeURIComponent(canonicalCompanyId)}`;
@@ -276,17 +275,21 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
       if (decoded && typeof decoded === 'object') access = decoded;
     } catch (_) {}
     return {
-      companyId: sanitizeSegment(access.companyId || meta.companyId || ''),
+      tenantId: sanitizeSegment(access.tenantId || access.companyId || meta.tenantId || meta.companyId || ''),
+      companyId: sanitizeSegment(access.tenantId || access.companyId || meta.tenantId || meta.companyId || ''),
       companyKey: String(access.companyKey || meta.companyKey || '').trim().toUpperCase()
     };
   }
 
   function locationBelongsToCurrentCompany(location, data) {
-    if (location.root === primaryRoot && location.companyId === canonicalCompanyId) return true;
+    const stats = remoteStats(data);
+    if (!stats.hasData) return location.root === primaryRoot && location.companyId === canonicalCompanyId;
     const identity = remoteIdentity(data);
-    if (identity.companyId && identity.companyId === canonicalCompanyId) return true;
-    if (normalizedCompanyKey && identity.companyKey === normalizedCompanyKey) return true;
-    return false;
+    // أي عقدة تحتوي بيانات يجب أن تعلن نفس tenantId الثابت. لا نعتمد على المفتاح
+    // وحده لأن المفتاح يمكن تغييره أو إعادة استخدامه لاحقاً لشركة أخرى.
+    if (!identity.tenantId || identity.tenantId !== canonicalCompanyId) return false;
+    if (normalizedCompanyKey && identity.companyKey && identity.companyKey !== normalizedCompanyKey) return false;
+    return true;
   }
 
   function loadCachedLocation() {
@@ -335,6 +338,9 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
     try {
       exactRead = await readLocation(exact, token);
       if (remoteStats(exactRead.data).hasData) {
+        if (!locationBelongsToCurrentCompany(exact, exactRead.data)) {
+          throw new Error('تعارض هوية مسار Firebase: المسار الحالي يحتوي بيانات شركة أخرى. تم إيقاف المزامنة لحماية البيانات.');
+        }
         saveSelectedLocation(exact);
         return { location: exact, read: exactRead };
       }
@@ -557,11 +563,12 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
 
   function companyMeta(location, extra = {}) {
     return {
-      companyId: location.companyId,
+      tenantId: canonicalCompanyId,
+      companyId: canonicalCompanyId,
       companyKey: session.companyKey || '',
       companyName: session.companyName || '',
       appName: 'كاش توب 2',
-      schema: 18,
+      schema: 19,
       datasetCount: core.DATA_KEYS.length,
       deviceId: core.rawGet('cashtop_device_id') || '',
       updatedAt: Date.now(),
@@ -587,6 +594,9 @@ if (settings.enabled && core && settings.config?.databaseURL && settings.config?
         if (attempt > 0) resolved = { location: resolved.location, read: await readLocation(resolved.location, token) };
         const remoteRead = resolved.read;
         const remoteCompany = remoteRead.data && typeof remoteRead.data === 'object' ? remoteRead.data : {};
+        if (remoteStats(remoteCompany).hasData && !locationBelongsToCurrentCompany(resolved.location, remoteCompany)) {
+          throw new Error('تم منع مزامنة عقدة لا تخص المفتاح الحالي. لا توجد أي بيانات مشتركة بين الشركات.');
+        }
         const remoteDatasets = remoteCompany.datasets && typeof remoteCompany.datasets === 'object'
           ? remoteCompany.datasets
           : {};

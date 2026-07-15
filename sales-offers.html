@@ -13,7 +13,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="icon" href="icon-192.png"><link rel="stylesheet" href="cashtop-core.css?v=20">
-<script src="cashtop-core.js?v=20"></script><script src="firebase-config.js?v=19"></script><script src="accounting-engine.js"></script><script type="module" src="firebase-sync.js?v=19"></script>
+<script src="cashtop-core.js?v=22"></script><script src="firebase-config.js?v=19"></script><script src="accounting-engine.js"></script><script type="module" src="firebase-sync.js?v=20"></script>
 <style>
         * {
             box-sizing: border-box;
@@ -545,10 +545,18 @@
     if (mode==='print') {
       const win=window.open('','_blank'); win.document.write(`<html dir="rtl"><head><title>عروض المبيعات</title><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;700&display=swap" rel="stylesheet"></head><body>${exportMarkup(items)}<script>onload=()=>print()<\/script></body></html>`); win.document.close(); return;
     }
+    if (mode==='pdf') {
+      const data = rows(items);
+      const columns = data.length ? Object.keys(data[0]) : ['البيان'];
+      const body = data.map(r => columns.map(c => r[c] ?? ''));
+      try {
+        await CashtopExport.exportDataTablePDF({ title:'عروض المبيعات', columns, rows:body, filename:`عروض-المبيعات-${Date.now()}.pdf`, orientation:'landscape', fontSize:7 });
+      } catch (err) { console.error(err); toast('تعذر إنشاء PDF','error'); }
+      return;
+    }
     const area=$('offerExportArea'); area.innerHTML=exportMarkup(items);
     const canvas=await html2canvas(area,{scale:2,backgroundColor:'#ffffff'});
     if(mode==='image') { canvas.toBlob(blob=>downloadBlob(blob,`عروض-المبيعات-${Date.now()}.png`)); return; }
-    const image=canvas.toDataURL('image/png'); const {jsPDF}=window.jspdf; const pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}); const width=277; const height=canvas.height*width/canvas.width; pdf.addImage(image,'PNG',10,10,width,Math.min(height,190)); pdf.save(`عروض-المبيعات-${Date.now()}.pdf`);
   }
   function exportOne(id,mode) { const offer=offers.find(o=>String(o.id)===String(id)); if(offer) exportItems([offer],mode); }
 
@@ -572,4 +580,5 @@
       <a href="products.html"><i class="fa-solid fa-box-open"></i><span>المنتجات</span></a>
       <a href="customers.html"><i class="fa-solid fa-users"></i><span>العملاء</span></a>
       <a href="invoices.html"><i class="fa-solid fa-file-invoice"></i><span>الفواتير</span></a>
-    </nav></section></div></body></html>
+    </nav></section></div><script src="cashtop-export.js"></script>
+</body></html>

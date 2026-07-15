@@ -167,10 +167,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -573,6 +573,7 @@
         let currentDeleteId = null; // متغير لحفظ الـ ID المطلوب حذفه
 
         window.onload = function() {
+            try { window.Cashtop?.ensureSystemDefaults?.(); } catch (_) {}
             try {
                 // استخدمنا مفتاح تخزين جديد كلياً "cashtop_funds_db_v4" لمسح أخطائك السابقة والبدء بالكاش فقط
                 if (localStorage.getItem('cashtop_funds_db_v4')) {
@@ -645,7 +646,7 @@
                                 <button class="action-btn btn-pdf" title="تحميل كشف PDF فردي" onclick="exportAccountPDF(${item.id})"><i class="fa-solid fa-file-pdf"></i></button>
                                 <button class="action-btn btn-excel" title="تصدير السجل إلى Excel" onclick="exportAccountExcel(${item.id})"><i class="fa-solid fa-file-excel"></i></button>
                                 <button class="action-btn btn-edit" title="تعديل الحساب" onclick="editAccount(${item.id})"><i class="fa-solid fa-pen-to-square"></i></button>
-                                <button class="action-btn btn-delete" title="حذف الحساب نهائياً" onclick="confirmDeleteAccount(${item.id})"><i class="fa-solid fa-trash-can"></i></button>
+                                ${(item.isDefaultCash === true || item.locked === true) ? '<span title="صندوق الكاش افتراضي ولا يمكن حذفه" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;color:#16a34a;"><i class="fa-solid fa-lock"></i></span>' : `<button class="action-btn btn-delete" title="حذف الحساب نهائياً" onclick="confirmDeleteAccount(${item.id})"><i class="fa-solid fa-trash-can"></i></button>`}
                             </div>
                         </td>
                     </tr>
@@ -723,6 +724,8 @@
         function openAddAccountModal() {
             document.getElementById('accountForm').reset();
             document.getElementById('editAccountId').value = '';
+            document.getElementById('accName').disabled = false;
+            document.getElementById('accType').disabled = false;
             document.getElementById('accBalance').disabled = false;
             toggleOtherType();
             document.getElementById('accountModalTitle').innerHTML = '<i class="fa-solid fa-wallet"></i> إضافة صندوق مالي جديد';
@@ -734,7 +737,9 @@
             let acc = cashtop_funds_db.accounts.find(a => a.id === id);
             if (acc) {
                 document.getElementById('editAccountId').value = acc.id.toString();
-                document.getElementById('accName').value = acc.name;
+                const isDefaultCash = acc.isDefaultCash === true || acc.locked === true;
+                document.getElementById('accName').value = isDefaultCash ? 'صندوق الكاش' : acc.name;
+                document.getElementById('accName').disabled = isDefaultCash;
                 
                 let select = document.getElementById('accType');
                 let otherInp = document.getElementById('accTypeOther');
@@ -750,6 +755,7 @@
                     otherInp.required = true;
                 }
 
+                if (isDefaultCash) { select.value = 'كاش'; select.disabled = true; } else { select.disabled = false; }
                 document.getElementById('accBalance').value = acc.balance;
                 document.getElementById('accBalance').disabled = true; // منع التلاعب بالرصيد أثناء التعديل
                 document.getElementById('accNotes').value = acc.notes || '';
@@ -763,10 +769,12 @@
             e.preventDefault();
             const editIdStr = document.getElementById('editAccountId').value;
             const isEditMode = editIdStr !== '';
+            const editingAccount = isEditMode ? cashtop_funds_db.accounts.find(a => String(a.id) === String(editIdStr)) : null;
+            const editingDefaultCash = editingAccount && (editingAccount.isDefaultCash === true || editingAccount.locked === true);
             
-            const usernameToSave = document.getElementById('accName').value.trim();
+            const usernameToSave = editingDefaultCash ? 'صندوق الكاش' : document.getElementById('accName').value.trim();
             
-            let finalType = document.getElementById('accType').value;
+            let finalType = editingDefaultCash ? 'كاش' : document.getElementById('accType').value;
             if(finalType === 'أخرى') {
                 finalType = document.getElementById('accTypeOther').value.trim();
                 if(!finalType) { showToast('يرجى كتابة نوع الحساب بدقة!', 'error'); return; }
@@ -813,9 +821,10 @@
         /*   نافذة تأكيد الحذف الخاصة وإجراء الحذف                    */
         /* ========================================================== */
         function confirmDeleteAccount(id) {
-            let acc = cashtop_funds_db.accounts.find(a => a.id === id);
+            let acc = cashtop_funds_db.accounts.find(a => String(a.id) === String(id));
             if (acc) {
-                currentDeleteId = id;
+                if (acc.isDefaultCash === true || acc.locked === true) { showToast('صندوق الكاش افتراضي ولا يمكن حذفه.', 'error'); return; }
+                currentDeleteId = acc.id;
                 document.getElementById('deleteAccNameText').innerText = acc.name;
                 openModal('deleteModal');
             }
@@ -823,8 +832,10 @@
 
         function executeDelete() {
             if (currentDeleteId !== null) {
-                cashtop_funds_db.accounts = cashtop_funds_db.accounts.filter(a => a.id !== currentDeleteId);
-                cashtop_funds_db.accountLogs = cashtop_funds_db.accountLogs.filter(l => l.accountId !== currentDeleteId);
+                const target = cashtop_funds_db.accounts.find(a => String(a.id) === String(currentDeleteId));
+                if (target && (target.isDefaultCash === true || target.locked === true)) { closeModal('deleteModal'); currentDeleteId = null; showToast('لا يمكن حذف صندوق الكاش الافتراضي.', 'error'); return; }
+                cashtop_funds_db.accounts = cashtop_funds_db.accounts.filter(a => String(a.id) !== String(currentDeleteId));
+                cashtop_funds_db.accountLogs = cashtop_funds_db.accountLogs.filter(l => String(l.accountId) !== String(currentDeleteId));
                 localStorage.setItem('cashtop_funds_db_v4', JSON.stringify(cashtop_funds_db));
                 initLayout();
                 closeModal('deleteModal');
@@ -902,31 +913,26 @@
             return acc;
         }
 
-        function exportAccountPDF(id) {
-            let acc = prepareIndividualExportData(id);
+        async function exportAccountPDF(id) {
+            const acc = prepareIndividualExportData(id);
+            if (!acc) return;
             const area = document.getElementById("exportIndividualTemplate");
-            area.style.top = '0'; 
+            area.style.top = '0';
             area.style.zIndex = '-1';
-
-            showToast("جاري المعالجة... يرجى الانتظار", "success");
-
-            html2canvas(area, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`كشف_حساب_${acc.name.replace(/\s+/g, '_')}.pdf`);
-                
-                area.style.top = '-9999px';
+            showToast("جاري إنشاء كشف حساب جدولي...", "success");
+            try {
+                await CashtopExport.exportElementTablesToPDF(area, `كشف_حساب_${acc.name}.pdf`, {
+                    title: `كشف حساب: ${acc.name}`,
+                    subtitle: `نوع الحساب: ${acc.type} — الرصيد الحالي: ${parseFloat(acc.balance || 0).toFixed(2)} ₪`,
+                    orientation: 'landscape'
+                });
                 showToast("تم تحميل كشف الحساب (PDF) بنجاح.", "success");
-            }).catch(err => {
-                area.style.top = '-9999px';
+            } catch (err) {
+                console.error(err);
                 showToast("حدث خطأ أثناء التصدير.", "error");
-            });
+            } finally {
+                area.style.top = '-9999px';
+            }
         }
 
         function exportAccountExcel(id) {
@@ -983,31 +989,24 @@
             document.getElementById('exportTotalFundsAll').innerText = total.toLocaleString('en-US', {minimumFractionDigits: 2}) + ' ₪';
         }
 
-        function exportAllAccountsPDF() {
+        async function exportAllAccountsPDF() {
             prepareGlobalExportData();
             const area = document.getElementById("exportAllTemplate");
-            area.style.top = '0'; 
+            area.style.top = '0';
             area.style.zIndex = '-1';
-
-            showToast("جاري معالجة الكشف الشامل... يرجى الانتظار", "success");
-
-            html2canvas(area, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`كشف_الحسابات_الشامل_${Date.now()}.pdf`);
-                
-                area.style.top = '-9999px';
+            showToast("جاري إنشاء الكشف الشامل كجدول PDF...", "success");
+            try {
+                await CashtopExport.exportElementTablesToPDF(area, `كشف_الحسابات_الشامل_${Date.now()}.pdf`, {
+                    title: 'كشف الصناديق والأرصدة الشامل',
+                    orientation: 'landscape'
+                });
                 showToast("تم تحميل الكشف الشامل (PDF) بنجاح.", "success");
-            }).catch(err => {
-                area.style.top = '-9999px';
+            } catch (err) {
+                console.error(err);
                 showToast("حدث خطأ أثناء التصدير.", "error");
-            });
+            } finally {
+                area.style.top = '-9999px';
+            }
         }
 
         function exportAllAccountsExcel() {
@@ -1049,6 +1048,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"accounts.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

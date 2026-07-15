@@ -17,6 +17,9 @@
     
     <!-- استيراد مكتبة Font Awesome للأيقونات -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
@@ -150,10 +153,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -304,8 +307,8 @@
             <div class="table-header-wrapper">
                 <div class="table-title">سجل جرد النواقص المطلوبة للتوريد</div>
                 <div class="export-group">
-                    <button class="btn-export excel" onclick="showToast('جاري تصدير النواقص إلى إكسل...', 'success')"><i class="fa-solid fa-file-excel"></i> اكسل</button>
-                    <button class="btn-export pdf" onclick="showToast('جاري توليد كشف النواقص PDF...', 'success')"><i class="fa-solid fa-file-pdf"></i> PDF</button>
+                    <button class="btn-export excel" onclick="exportShortagesExcel()"><i class="fa-solid fa-file-excel"></i> اكسل</button>
+                    <button class="btn-export pdf" onclick="exportShortagesPDF()"><i class="fa-solid fa-file-pdf"></i> PDF</button>
                     <button class="btn-export print" onclick="window.print()"><i class="fa-solid fa-print"></i> طباعة</button>
                 </div>
             </div>
@@ -518,18 +521,20 @@
             document.getElementById('statAlertLimit').innerText = globalAlertLimit;
         }
 
-        function renderFilteredTable() {
-            const query = document.getElementById('searchQuery').value.toLowerCase();
-            const filterType = document.getElementById('filterCategory').value;
-
-            let filtered = shortageList.filter(item => {
-                let matchesSearch = item.rawName.toLowerCase().includes(query) || item.barcode.toLowerCase().includes(query);
+        function getFilteredShortages() {
+            const query = String(document.getElementById('searchQuery')?.value || '').toLowerCase();
+            const filterType = document.getElementById('filterCategory')?.value || 'all';
+            return shortageList.filter(item => {
+                const matchesSearch = String(item.rawName || '').toLowerCase().includes(query) || String(item.barcode || '').toLowerCase().includes(query);
                 let matchesFilter = true;
                 if (filterType === 'critical') matchesFilter = item.qty <= 0;
                 else if (filterType === 'warning') matchesFilter = item.qty > 0;
                 return matchesSearch && matchesFilter;
             });
+        }
 
+        function renderFilteredTable() {
+            const filtered = getFilteredShortages();
             const tbody = document.getElementById('shortageTableBody');
             tbody.innerHTML = "";
 
@@ -560,6 +565,60 @@
                     </tr>
                 `;
             });
+        }
+
+        function exportShortagesExcel() {
+            const rows = getFilteredShortages();
+            const wsData = [
+                ['كاش توب 2 - تقرير الأصناف الناقصة'],
+                ['تاريخ التقرير', new Date().toLocaleString('en-GB')],
+                [],
+                ['#', 'الباركود', 'اسم الصنف / المنتج', 'التكلفة (₪)', 'المتوفر حالياً', 'الوحدة', 'حد الطلب الأدنى', 'الحالة المخزنية']
+            ];
+            rows.forEach((item, index) => wsData.push([
+                index + 1,
+                item.barcode || '-',
+                item.rawName || '-',
+                Number(item.cost || 0),
+                Number(item.qty || 0),
+                item.unit || 'قطعة',
+                Number(item.limit || 0),
+                Number(item.qty || 0) <= 0 ? 'منتهي (نفد)' : 'شارف على النفاد'
+            ]));
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+            ws['!cols'] = [{wch:6},{wch:20},{wch:38},{wch:14},{wch:16},{wch:12},{wch:16},{wch:22}];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'النواقص');
+            XLSX.writeFile(wb, `تقرير_النواقص_${Date.now()}.xlsx`);
+            showToast('تم تنزيل تقرير النواقص Excel بنجاح.', 'success');
+        }
+
+        async function exportShortagesPDF() {
+            const rows = getFilteredShortages();
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: 'تقرير الأصناف الناقصة والمطلوبة للتوريد',
+                    subtitle: `عدد الأصناف الظاهرة: ${rows.length} — تاريخ التقرير: ${new Date().toLocaleString('en-GB')}`,
+                    columns: ['#', 'الباركود', 'اسم الصنف / المنتج', 'التكلفة (₪)', 'المتوفر', 'الوحدة', 'حد الطلب', 'الحالة'],
+                    rows: rows.map((item, index) => [
+                        index + 1,
+                        item.barcode || '-',
+                        item.rawName || '-',
+                        Number(item.cost || 0).toFixed(2),
+                        Number(item.qty || 0),
+                        item.unit || 'قطعة',
+                        Number(item.limit || 0),
+                        Number(item.qty || 0) <= 0 ? 'منتهي (نفد)' : 'شارف على النفاد'
+                    ]),
+                    filename: `تقرير_النواقص_${Date.now()}.pdf`,
+                    orientation: 'landscape',
+                    fontSize: 9
+                });
+                showToast('تم تنزيل تقرير النواقص PDF بنجاح.', 'success');
+            } catch (error) {
+                console.error(error);
+                showToast('تعذر إنشاء تقرير النواقص PDF.', 'error');
+            }
         }
 
         function loadSuppliersDropdown() {
@@ -733,6 +792,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"shortages.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

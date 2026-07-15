@@ -176,10 +176,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -1434,53 +1434,20 @@
             XLSX.writeFile(wb, `سجل_حركات_المندوب_${Date.now()}.xlsx`);
         }
 
-        function exportAgentHistoryPDF() {
-            let id = document.getElementById('historyAgentId').value;
-            let a = agentsData.find(x => x.id === id);
-            let agentHistory = agentMovementsData.filter(m => m.agentId === id);
-
-            if(agentHistory.length === 0) { showToast("لا توجد حركات للتصدير!", "error"); return; }
-            
-            showToast("جاري استخراج PDF...", "success");
-            
-            let tbody = '';
-            agentHistory.reverse().forEach(mov => {
-                let colorCode = '#333';
-                if(mov.type.includes('تحميل')) colorCode = '#f39c12';
-                if(mov.type.includes('تسوية')) colorCode = '#3b82f6';
-                if(mov.type.includes('توريد')) colorCode = '#00a65a';
-                if(mov.type.includes('صرف')) colorCode = '#8e44ad';
-
-                tbody += `<tr>
-                    <td style="border: 1px solid #ddd; padding: 10px; direction:ltr;">${mov.date}</td>
-                    <td style="border: 1px solid #ddd; padding: 10px; font-weight:bold; color:${colorCode};">${mov.type}</td>
-                    <td style="border: 1px solid #ddd; padding: 10px; text-align:right;">${mov.details}</td>
-                    <td style="border: 1px solid #ddd; padding: 10px; font-weight:bold;">${mov.amount.toFixed(2)}</td>
-                </tr>`;
-            });
-
-            document.getElementById('pdfHeaderTitle').innerText = `سجل حركات وعمليات المندوب: ${a.name}`;
-            document.getElementById('pdfDate').innerText = `تاريخ التصدير: ${new Date().toLocaleString('ar-EG')}`;
-            document.getElementById('pdfTable').innerHTML = `
-                <thead><tr style="background:#f1f5f9;">
-                    <th style="border: 1px solid #ddd; padding: 10px;">التاريخ والوقت</th>
-                    <th style="border: 1px solid #ddd; padding: 10px;">نوع الحركة</th>
-                    <th style="border: 1px solid #ddd; padding: 10px;">التفاصيل</th>
-                    <th style="border: 1px solid #ddd; padding: 10px;">القيمة (₪)</th>
-                </tr></thead>
-                <tbody>${tbody}</tbody>
-            `;
-
-            const container = document.getElementById('pdfExportContainer');
-            html2canvas(container, { scale: 2, backgroundColor: '#ffffff' }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4'); 
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
-                pdf.save(`حركات_المندوب_${a.name}_${Date.now()}.pdf`);
-            });
+        async function exportAgentHistoryPDF() {
+            const id = document.getElementById('historyAgentId').value;
+            const a = agentsData.find(x => x.id === id);
+            const agentHistory = agentMovementsData.filter(m => m.agentId === id).slice().reverse();
+            if(!a || agentHistory.length === 0) { showToast("لا توجد حركات للتصدير!", "error"); return; }
+            const rows = agentHistory.map((mov, i) => [i + 1, mov.date || '-', mov.type || '-', mov.details || '-', Number(mov.amount || 0).toFixed(2)]);
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: `سجل حركات وعمليات المندوب: ${a.name || '-'}`,
+                    columns: ['#', 'التاريخ والوقت', 'نوع الحركة', 'التفاصيل', 'القيمة (₪)'],
+                    rows, filename: `حركات_المندوب_${a.name || 'مندوب'}_${Date.now()}.pdf`, orientation: 'landscape'
+                });
+                showToast('تم تنزيل سجل حركات المندوب.', 'success');
+            } catch (err) { console.error(err); showToast('تعذر إنشاء PDF سجل المندوب.', 'error'); }
         }
 
         // ==========================================
@@ -1514,55 +1481,24 @@
             XLSX.writeFile(wb, `سجل_المناديب_الخارجي_${Date.now()}.xlsx`);
         }
 
-        function exportMainPDF() {
+        async function exportMainPDF() {
             if (agentsData.length === 0) { showToast("لا توجد بيانات للتصدير", "error"); return; }
-            showToast("جاري إعداد وتحميل PDF...", "success");
-
-            let tbody = '';
-            agentsData.forEach(a => {
+            const rows = agentsData.map((a, i) => {
                 let carValue = 0;
-                a.carStock.forEach(item => { carValue += (item.qty * item.price); });
-                let debt = (parseFloat(a.totalSales) || 0) - (parseFloat(a.totalCollected) || 0);
-                let commStr = a.commType === 'percent' ? `نسبة ${a.commValue}%` : `ثابت ${a.commValue} ₪`;
-
-                tbody += `
-                    <tr>
-                        <td style="border: 1px solid #ddd; padding: 8px; font-weight:bold;">${a.name}</td>
-                        <td style="border: 1px solid #ddd; padding: 8px; direction:ltr;">${a.phone}</td>
-                        <td style="border: 1px solid #ddd; padding: 8px; color:#f39c12; font-weight:bold;">${carValue.toFixed(2)}</td>
-                        <td style="border: 1px solid #ddd; padding: 8px; color:#3b82f6; font-weight:bold;">${(parseFloat(a.totalSales)||0).toFixed(2)}</td>
-                        <td style="border: 1px solid #ddd; padding: 8px; color:#00a65a; font-weight:bold;">${(parseFloat(a.totalCollected)||0).toFixed(2)}</td>
-                        <td style="border: 1px solid #ddd; padding: 8px; color:#dd4b39; font-weight:bold;">${debt.toFixed(2)}</td>
-                        <td style="border: 1px solid #ddd; padding: 8px; color:#605ca8; font-weight:bold;">${a.totalCommission.toFixed(2)}</td>
-                    </tr>
-                `;
+                (a.carStock || []).forEach(item => { carValue += (Number(item.qty) || 0) * (Number(item.price) || 0); });
+                const sales = parseFloat(a.totalSales) || 0;
+                const collected = parseFloat(a.totalCollected) || 0;
+                const debt = sales - collected;
+                return [i + 1, a.name || '-', a.phone || '-', carValue.toFixed(2), sales.toFixed(2), collected.toFixed(2), debt.toFixed(2), Number(a.totalCommission || 0).toFixed(2)];
             });
-
-            document.getElementById('pdfHeaderTitle').innerText = "التقرير الشامل لمناديب المبيعات - كاش توب";
-            document.getElementById('pdfDate').innerText = `تاريخ التصدير: ${new Date().toLocaleString('ar-EG')}`;
-            document.getElementById('pdfTable').innerHTML = `
-                <thead><tr style="background:#f1f5f9;">
-                    <th style="border: 1px solid #ddd; padding: 8px;">اسم المندوب</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">الجوال</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">عهدة البضاعة (₪)</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">المبيعات المسجلة (₪)</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">نقدية موردة (₪)</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">الذمة (₪)</th>
-                    <th style="border: 1px solid #ddd; padding: 8px;">العمولة المستحقة (₪)</th>
-                </tr></thead>
-                <tbody>${tbody}</tbody>
-            `;
-
-            const container = document.getElementById('pdfExportContainer');
-            html2canvas(container, { scale: 2, backgroundColor: '#ffffff' }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4'); 
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
-                pdf.save(`تقرير_مناديب_كاش_توب_${Date.now()}.pdf`);
-            });
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: 'التقرير الشامل لمناديب المبيعات',
+                    columns: ['#', 'اسم المندوب', 'الجوال', 'عهدة البضاعة', 'المبيعات', 'النقدية الموردة', 'الذمة', 'العمولة المستحقة'],
+                    rows,
+                    filename: `تقرير_مناديب_كاش_توب_${Date.now()}.pdf`, orientation: 'landscape', fontSize: 7
+                });
+            } catch (err) { console.error(err); showToast('تعذر إنشاء PDF المناديب.', 'error'); }
         }
 
         window.onload = initSystem;
@@ -1580,6 +1516,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"المناديب.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

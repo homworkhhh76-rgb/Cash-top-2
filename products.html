@@ -235,10 +235,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -931,7 +931,7 @@
             const select = document.getElementById('transferDestination');
             if (!select) return;
             storesData = readArray('cashtop_stores').filter(store =>
-                store && !store.branchId && !String(store.id || '').startsWith('shop_') && String(store.id || '') !== 'shop'
+                store && !String(store.id || '').startsWith('shop_') && String(store.id || '') !== 'shop'
             );
             select.innerHTML = '<option value="">اختر مخزناً من صفحة المخازن...</option>' + storesData.map(store =>
                 `<option value="${String(store.id)}">${String(store.name || 'مخزن بدون اسم')}</option>`
@@ -944,7 +944,7 @@
             if (!select) return;
             const current = select.value || 'shop';
             storesData = readArray('cashtop_stores').filter(store =>
-                store && !store.branchId && !String(store.id || '').startsWith('shop_') && String(store.id || '') !== 'shop'
+                store && !String(store.id || '').startsWith('shop_') && String(store.id || '') !== 'shop'
             );
             select.innerHTML = '<option value="shop">المحل / المخزون الرئيسي</option>' + storesData.map(store =>
                 `<option value="${String(store.id)}">${String(store.name || 'مخزن بدون اسم')}</option>`
@@ -2257,23 +2257,23 @@
             });
         }
 
-        function exportTransferPDF() {
-            document.body.insertAdjacentHTML('beforeend', prepareTransferExportHTML());
-            const area = document.getElementById("transferExportTemplate");
-
-            html2canvas(area, { scale: 2 }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`حركات_النقل_${Date.now()}.pdf`);
-                area.remove();
+        async function exportTransferPDF() {
+            if (transferHistory.length === 0) { showToast("لا توجد بيانات للتصدير", "warning"); return; }
+            const rows = transferHistory.map(trn => [
+                trn.date || '-',
+                trn.destination || '-',
+                (trn.items || []).map(i => `${i.name} - ${i.transferQty} ${i.transferUnit === 'unit' ? i.unitName : i.pieceName}`).join(' | ')
+            ]);
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: 'تقرير حركات النقل المخزني',
+                    columns: ['تاريخ الحركة', 'المخزن الهدف', 'المنتجات والكميات والوحدات'],
+                    rows,
+                    filename: `حركات_النقل_${Date.now()}.pdf`,
+                    orientation: 'landscape'
+                });
                 showToast("تم تحميل ملف PDF بنجاح", "success");
-            });
+            } catch (err) { console.error(err); showToast('تعذر إنشاء ملف PDF.', 'error'); }
         }
 
         /* ========================================================== */
@@ -2431,26 +2431,20 @@
             });
         }
 
-        function exportPDF() {
+        async function exportPDF() {
             prepareExportData();
             const area = document.getElementById("exportTemplateContainer");
-            area.style.top = '0'; 
+            area.style.top = '0';
             area.style.zIndex = '-1';
-
-            html2canvas(area, { scale: 2, backgroundColor: "#ffffff" }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                
-                const imgProps= pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save(`تقرير_المخزون_${Date.now()}.pdf`);
-                area.style.top = '-9999px';
+            try {
+                await CashtopExport.exportElementTablesToPDF(area, `تقرير_المخزون_${Date.now()}.pdf`, {
+                    title: 'تقرير المخزون والمنتجات',
+                    orientation: 'landscape',
+                    fontSize: 7.5
+                });
                 showToast("تم تحميل ملف PDF بنجاح", "success");
-            });
+            } catch (err) { console.error(err); showToast('تعذر إنشاء ملف PDF.', 'error'); }
+            finally { area.style.top = '-9999px'; }
         }
     </script>
 </div></main>
@@ -2466,6 +2460,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"products.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

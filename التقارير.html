@@ -157,10 +157,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -861,97 +861,38 @@
         // ========================================================
         // التصدير إلى PDF بجدول احترافي مفصل بدون سكرين شوت
         // ========================================================
-        function exportPDF() {
-            showToast("جاري تجهيز وتوليد ملف הـ PDF التفصيلي... الرجاء الانتظار", "success");
-            let filterText = document.getElementById('currentFilterLabel').innerText;
-            
-            let topProdsHtml = '';
-            topProductsArrForExport.slice(0, 10).forEach(p => {
-                topProdsHtml += `<tr><td>${p.name}</td><td>${p.qty}</td><td style="color:#00a65a; font-weight:bold;">${p.revenue.toFixed(2)} ₪</td></tr>`;
-            });
-            if(topProductsArrForExport.length === 0) topProdsHtml = `<tr><td colspan="3" style="text-align:center;">لا توجد مبيعات في هذه الفترة</td></tr>`;
-
-            let suppliersHtml = '';
-            suppliersData.forEach(s => {
-                suppliersHtml += `<tr><td>${s.name}</td><td style="color:#dd4b39; font-weight:bold;">${parseFloat(s.balance).toFixed(2)} ₪</td></tr>`;
-            });
-            if(suppliersData.length === 0) suppliersHtml = `<tr><td colspan="2" style="text-align:center;">لا يوجد موردين</td></tr>`;
-
-            let branchHtml = '';
-            branchExportArr.forEach(b => {
-                branchHtml += `<tr><td>${b.name}</td><td>${b.sales.toFixed(2)} ₪</td><td>${b.margin.toFixed(1)}%</td></tr>`;
-            });
-            if(branchExportArr.length === 0) branchHtml = `<tr><td colspan="3" style="text-align:center;">لا توجد فروع مسجلة</td></tr>`;
-
-            // بناء هيكل HTML مخفي للطباعة فقط لضمان تنسيق ممتاز
-            let htmlReport = `
-                <div style="text-align:center; margin-bottom: 25px;">
-                    <h2 style="color:#605ca8; margin-bottom:5px;">تقرير الإدارة المالي الشامل - كاش توب</h2>
-                    <p style="font-weight:bold; color:#555; font-size:14px;">${filterText}</p>
-                </div>
-                
-                <h3 class="pdf-section-title">الملخص المالي والديون</h3>
-                <table class="pdf-table">
-                    <tr><th>إجمالي المبيعات</th><th>تكلفة المباع</th><th>صافي الأرباح</th><th>المقبوض نقداً</th><th>الديون بالسوق</th></tr>
-                    <tr>
-                        <td style="color:#3b82f6; font-weight:bold; font-size:14px;">${repSales.toFixed(2)} ₪</td>
-                        <td>${repCost.toFixed(2)} ₪</td>
-                        <td style="color:#00a65a; font-weight:bold; font-size:14px;">${repNetProfit.toFixed(2)} ₪</td>
-                        <td>${repPaid.toFixed(2)} ₪</td>
-                        <td style="color:#dd4b39; font-weight:bold; font-size:14px;">${repDebt.toFixed(2)} ₪</td>
-                    </tr>
-                </table>
-
-                <h3 class="pdf-section-title">ملخص أصول المخزون</h3>
-                <table class="pdf-table">
-                    <tr><th>عدد المنتجات (أنواع)</th><th>قيمة المخزون (تكلفة)</th><th>الأرباح المتوقعة المستقبلية</th></tr>
-                    <tr>
-                        <td>${productsData.length} صنف</td>
-                        <td style="color:#605ca8; font-weight:bold; font-size:14px;">${repInvCost.toFixed(2)} ₪</td>
-                        <td style="color:#f39c12; font-weight:bold; font-size:14px;">${(repInvPrice - repInvCost).toFixed(2)} ₪</td>
-                    </tr>
-                </table>
-
-                <h3 class="pdf-section-title">أداء الفروع والمبيعات</h3>
-                <table class="pdf-table">
-                    <tr><th>اسم الفرع</th><th>إجمالي المبيعات</th><th>هامش الربح التشغيلي</th></tr>
-                    ${branchHtml}
-                </table>
-
-                <div style="display:flex; gap:20px; align-items:flex-start;">
-                    <div style="flex:1;">
-                        <h3 class="pdf-section-title">أعلى 10 منتجات مبيعاً</h3>
-                        <table class="pdf-table">
-                            <tr><th>اسم المنتج</th><th>الكمية</th><th>الإيراد</th></tr>
-                            ${topProdsHtml}
-                        </table>
-                    </div>
-                    <div style="flex:1;">
-                        <h3 class="pdf-section-title">ديون واستحقاقات الموردين</h3>
-                        <table class="pdf-table">
-                            <tr><th>اسم المورد</th><th>المستحق له</th></tr>
-                            ${suppliersHtml}
-                            <tr style="background:#f9f9f9;"><td style="font-weight:bold;">إجمالي المطلوب سداده</td><td style="color:#dd4b39; font-weight:bold; font-size:14px;">${repSupDebt.toFixed(2)} ₪</td></tr>
-                        </table>
-                    </div>
-                </div>
-                
-                <div style="text-align:center; margin-top:35px; font-size:12px; color:#888; border-top:1px dashed #ccc; padding-top:15px;">تم إصدار التقرير آلياً عبر نظام كاش توب | تاريخ الطباعة: ${new Date().toLocaleString('ar-EG')}</div>
-            `;
-
-            const container = document.getElementById('detailedReportContainer');
-            container.innerHTML = htmlReport;
-
-            html2canvas(container, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4'); 
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
-                pdf.save(`تقرير_كاش_توب_التفصيلي_${Date.now()}.pdf`);
-                container.innerHTML = ''; 
-            });
+        async function exportPDF() {
+            showToast("جاري إنشاء التقرير كجداول PDF فعلية...", "success");
+            const filterText = document.getElementById('currentFilterLabel')?.innerText || '';
+            const summaryRows = [
+                ['إجمالي المبيعات', repSales.toFixed(2) + ' ₪'],
+                ['تكلفة المباع', repCost.toFixed(2) + ' ₪'],
+                ['صافي الأرباح', repNetProfit.toFixed(2) + ' ₪'],
+                ['المقبوض نقداً', repPaid.toFixed(2) + ' ₪'],
+                ['الديون بالسوق', repDebt.toFixed(2) + ' ₪'],
+                ['عدد المنتجات', productsData.length],
+                ['قيمة المخزون (تكلفة)', repInvCost.toFixed(2) + ' ₪'],
+                ['الأرباح المتوقعة المستقبلية', (repInvPrice - repInvCost).toFixed(2) + ' ₪']
+            ];
+            const host = document.createElement('div');
+            host.style.position = 'fixed'; host.style.left = '-100000px'; host.style.top = '0';
+            const branchRows = branchExportArr.length ? branchExportArr.map(b => `<tr><td>${b.name}</td><td>${b.sales.toFixed(2)} ₪</td><td>${b.margin.toFixed(1)}%</td></tr>`).join('') : '<tr><td colspan="3">لا توجد فروع مسجلة</td></tr>';
+            const topRows = topProductsArrForExport.slice(0,10).length ? topProductsArrForExport.slice(0,10).map(p => `<tr><td>${p.name}</td><td>${p.qty}</td><td>${p.revenue.toFixed(2)} ₪</td></tr>`).join('') : '<tr><td colspan="3">لا توجد مبيعات في هذه الفترة</td></tr>';
+            const supplierRows = suppliersData.length ? suppliersData.map(s => `<tr><td>${s.name}</td><td>${parseFloat(s.balance || 0).toFixed(2)} ₪</td></tr>`).join('') : '<tr><td colspan="2">لا يوجد موردون</td></tr>';
+            host.innerHTML = `
+                <h2>تقرير الإدارة المالي الشامل - كاش توب</h2><p>${filterText}</p>
+                <table><thead><tr><th>المؤشر المالي</th><th>القيمة</th></tr></thead><tbody>${summaryRows.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</tbody></table>
+                <table><thead><tr><th>اسم الفرع</th><th>إجمالي المبيعات</th><th>هامش الربح التشغيلي</th></tr></thead><tbody>${branchRows}</tbody></table>
+                <table><thead><tr><th>اسم المنتج</th><th>الكمية</th><th>الإيراد</th></tr></thead><tbody>${topRows}</tbody></table>
+                <table><thead><tr><th>اسم المورد</th><th>المستحق له</th></tr></thead><tbody>${supplierRows}<tr><td>إجمالي المطلوب سداده</td><td>${repSupDebt.toFixed(2)} ₪</td></tr></tbody></table>`;
+            document.body.appendChild(host);
+            try {
+                await CashtopExport.exportElementTablesToPDF(host, `تقرير_كاش_توب_التفصيلي_${Date.now()}.pdf`, {
+                    title: 'تقرير الإدارة المالي الشامل - كاش توب', subtitle: filterText, orientation: 'landscape', fontSize: 7.5
+                });
+                showToast('تم تنزيل التقرير بنجاح.', 'success');
+            } catch (err) { console.error(err); showToast('تعذر إنشاء التقرير PDF.', 'error'); }
+            finally { host.remove(); }
         }
 
         // نظام المشاركة (واتساب / إيميل)
@@ -1019,6 +960,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"التقارير.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

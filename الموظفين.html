@@ -207,10 +207,10 @@
     <!-- CASH TOP: shared shell, unified storage, accounting and Firebase sync -->
     <link rel="icon" href="icon-192.png">
     <link rel="stylesheet" href="cashtop-core.css?v=20">
-    <script src="cashtop-core.js?v=20"></script>
+    <script src="cashtop-core.js?v=22"></script>
     <script src="firebase-config.js?v=19"></script>
     <script src="accounting-engine.js"></script>
-    <script type="module" src="firebase-sync.js?v=19"></script>
+    <script type="module" src="firebase-sync.js?v=20"></script>
 </head>
 <body>
 <div class="ct-sidebar-overlay" id="ctSidebarOverlay" data-ct-action="close-sidebar"></div>
@@ -921,47 +921,17 @@
             XLSX.writeFile(wb, `سجل_الموظفين_${Date.now()}.xlsx`);
         }
 
-        function exportToPDF() {
+        async function exportToPDF() {
             if (employeesDB.length === 0) { showToast("لا توجد بيانات للتصدير", "error"); return; }
-            showToast("جاري استخراج PDF...", "success");
-
-            let tbody = '';
-            employeesDB.forEach(emp => {
-                tbody += `
-                    <tr>
-                        <td style="font-weight:bold;">${emp.name}</td>
-                        <td dir="ltr">${emp.phone}</td>
-                        <td style="color:#1e40af; font-family:sans-serif; font-weight:bold;">${emp.username}</td>
-                        <td style="color:${emp.status==='active'?'#166534':'#b91c1c'}; font-weight:bold;">${emp.status==='active'?'نشط':'معطل'}</td>
-                        <td>${emp.notes || '-'}</td>
-                    </tr>
-                `;
-            });
-
-            document.getElementById('pdfDate').innerText = `تاريخ الطباعة: ${new Date().toLocaleString('ar-EG')}`;
-            document.getElementById('pdfTable').innerHTML = `
-                <thead>
-                    <tr>
-                        <th>اسم الموظف</th>
-                        <th>رقم الجوال</th>
-                        <th>اسم المستخدم (يوزر)</th>
-                        <th>حالة الحساب</th>
-                        <th>ملاحظات إدارية</th>
-                    </tr>
-                </thead>
-                <tbody>${tbody}</tbody>
-            `;
-
-            const container = document.getElementById('pdfExportContainer');
-            html2canvas(container, { scale: 2, backgroundColor: '#ffffff' }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4'); 
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-                pdf.addImage(imgData, 'PNG', 0, 10, pdfWidth, pdfHeight);
-                pdf.save(`سجل_الموظفين_${Date.now()}.pdf`);
-            });
+            const rows = employeesDB.map((emp, i) => [i + 1, emp.name || '-', emp.phone || '-', emp.username || '-', emp.status === 'active' ? 'نشط' : 'معطل', emp.notes || '-']);
+            try {
+                await CashtopExport.exportDataTablePDF({
+                    title: 'سجل الموظفين',
+                    columns: ['#', 'اسم الموظف', 'رقم الجوال', 'اسم المستخدم', 'حالة الحساب', 'ملاحظات إدارية'],
+                    rows,
+                    filename: `سجل_الموظفين_${Date.now()}.pdf`, orientation: 'landscape'
+                });
+            } catch (err) { console.error(err); showToast('تعذر إنشاء PDF الموظفين.', 'error'); }
         }
     </script>
 </div></main>
@@ -977,6 +947,7 @@
 </div>
 
 <script type="application/json" id="ctEmbeddedShellMarker">{"embedded":true,"page":"الموظفين.html"}</script>
+<script src="cashtop-export.js"></script>
 </body>
 
 </html>

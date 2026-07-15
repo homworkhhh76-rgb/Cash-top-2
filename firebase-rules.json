@@ -9,7 +9,7 @@
         "$companyId": {
           ".read": "auth != null",
           ".write": "auth != null",
-          ".validate": "newData.hasChildren(['datasets']) || newData.hasChild('meta')"
+          ".validate": "newData.hasChild('meta') && (!newData.child('meta').hasChild('tenantId') || newData.child('meta/tenantId').val() == $companyId) && (!newData.child('meta').hasChild('companyId') || newData.child('meta/companyId').val() == $companyId) && (newData.child('meta/tenantId').val() == $companyId || newData.child('meta/companyId').val() == $companyId)"
         }
       }
     },
@@ -18,7 +18,7 @@
         "$companyId": {
           ".read": "auth != null",
           ".write": "auth != null",
-          ".validate": "newData.hasChildren(['datasets']) || newData.hasChild('meta')"
+          ".validate": "newData.hasChild('meta') && (!newData.child('meta').hasChild('tenantId') || newData.child('meta/tenantId').val() == $companyId) && (!newData.child('meta').hasChild('companyId') || newData.child('meta/companyId').val() == $companyId) && (newData.child('meta/tenantId').val() == $companyId || newData.child('meta/companyId').val() == $companyId)"
         }
       }
     },

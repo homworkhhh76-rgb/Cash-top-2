@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_VERSION = 'v30-revision-20';
+const CACHE_VERSION = 'v34-cross-branch-warehouse-transfer';
 const APP_CACHE = `cash-top-2-app-${CACHE_VERSION}`;
 const REMOTE_STATIC_CACHE = `cash-top-2-remote-static-${CACHE_VERSION}`;
 
@@ -20,6 +20,7 @@ const LOCAL_ASSETS = [
   './cashier.html',
   './cashtop-core.css',
   './cashtop-core.js',
+  './cashtop-export.js',
   './cashtop-logo.png',
   './customer-groups.html',
   './customers.html',
@@ -212,21 +213,37 @@ self.addEventListener('activate', event => {
   })());
 });
 
-async function localCacheFirst(request) {
-  const cache = await caches.open(APP_CACHE);
-  const cached = await cache.match(request, { ignoreSearch: true });
-  if (cached) return cached;
-
+async function refreshLocalCache(request, cache) {
   try {
     const response = await fetch(request, { cache: 'no-store' });
     if (response && response.ok) await cache.put(request, response.clone());
     return response;
   } catch (_) {
-    if (request.mode === 'navigate') {
-      return (await cache.match(new URL('./offline.html', self.registration.scope).href, { ignoreSearch: true })) || Response.error();
-    }
-    return Response.error();
+    return null;
   }
+}
+
+async function localCacheFirst(request) {
+  const cache = await caches.open(APP_CACHE);
+  const cached = await cache.match(request, { ignoreSearch: true });
+
+  // اعرض النسخة المحلية فوراً حتى مع وجود الإنترنت.
+  if (cached) return cached;
+
+  const response = await refreshLocalCache(request, cache);
+  if (response) return response;
+  if (request.mode === 'navigate') {
+    return (await cache.match(new URL('./offline.html', self.registration.scope).href, { ignoreSearch: true })) || Response.error();
+  }
+  return Response.error();
+}
+
+
+async function refreshCachedLocalInBackground(request) {
+  const cache = await caches.open(APP_CACHE);
+  const cached = await cache.match(request, { ignoreSearch: true });
+  if (!cached) return;
+  await refreshLocalCache(request, cache);
 }
 
 async function remoteStaticCacheFirst(request) {
@@ -253,6 +270,8 @@ self.addEventListener('fetch', event => {
 
   if (url.origin === self.location.origin) {
     event.respondWith(localCacheFirst(request));
+    // تحديث صامت بعد تقديم النسخة المخبأة فوراً، لضمان السرعة مع بقاء الكاش حديثاً.
+    event.waitUntil(refreshCachedLocalInBackground(request));
     return;
   }
 
